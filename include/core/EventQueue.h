@@ -12,7 +12,14 @@ namespace dongle {
 
 class EventQueue final {
 public:
-    static constexpr uint8_t CAPACITY = 32;
+    // A Classic Bluetooth scan can emit two events per entry plus a completion
+    // event (32 entries => 65 events). BLE emits one event per entry plus
+    // completion, and Wi-Fi scans can produce larger bursts. The queue must
+    // absorb a complete service update burst before DongleApplication drains it.
+    static constexpr uint8_t CAPACITY = 128;
+    static constexpr uint8_t MIN_SCAN_BURST_CAPACITY = 65;
+    static_assert(CAPACITY >= MIN_SCAN_BURST_CAPACITY,
+        "EventQueue capacity must absorb a complete Classic Bluetooth scan burst");
     static constexpr uint16_t MAX_PAYLOAD = 336;
 
     struct EventRecord {
