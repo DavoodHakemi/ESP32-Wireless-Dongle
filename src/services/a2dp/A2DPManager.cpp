@@ -471,7 +471,12 @@ Result<void> A2DPManager::connectAuto() {
         _fallbackName = name;
         _fallbackAttempted = false;
         memcpy(_pendingTargetAddress, parsed, sizeof(_pendingTargetAddress));
-        _pendingRetries = 3;
+        // ESP32-A2DP v1.8.10 performs auto-reconnect attempts on 10 s
+        // heartbeats and starts inquiry only after retries are exhausted.
+        // Three retries would push the library's discovery fallback beyond
+        // this manager's 60 s connection deadline. One retry leaves time for
+        // the library-owned Classic name discovery inside that deadline.
+        _pendingRetries = 1;
         _logger.info("A2DP auto-connect queued for cached Classic MAC %s", mac.c_str());
         return Result<void>::ok();
     }
