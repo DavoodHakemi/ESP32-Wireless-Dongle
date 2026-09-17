@@ -106,6 +106,29 @@ def test_a2dp_stats_are_mutex_protected_without_volatile():
     assert "mutable portMUX_TYPE _callbackMux" in header
 
 
+def test_a2dp_shutdown_is_nonblocking_during_discovery():
+    header = text("include/services/a2dp/A2DPSource.h")
+    source = text("src/services/a2dp/A2DPSource.cpp")
+    manager_h = text("include/services/a2dp/A2DPManager.h")
+    manager_cpp = text("src/services/a2dp/A2DPManager.cpp")
+    assert "void beginStop();" in header
+    assert "bool finishStop();" in header
+    assert "if (_source.is_discovery_active())" in source
+    assert "_source.cancel_discovery();" in source
+    assert "bool A2DPManager::processShutdown()" in manager_cpp
+    assert "_source.beginStop();" in manager_cpp
+    assert "_source.finishStop()" in manager_cpp
+    assert "ShutdownReason" in manager_h
+    assert "_source.stop();" not in manager_cpp
+
+
+def test_auto_reconnect_uses_direct_library_fallback():
+    source = text("src/services/a2dp/A2DPManager.cpp")
+    adapter = text("src/services/a2dp/A2DPSource.cpp")
+    assert "_pendingRetries = 0;" in source
+    assert "_source.set_auto_reconnect(address, retries >= 0 ? retries : 3);" in adapter
+
+
 def test_dependency_pin():
     pio = text("platformio.ini")
     assert "platform-espressif32/releases/download/51.03.07" in pio
@@ -137,9 +160,10 @@ def test_legacy_audio_status_payload_is_preserved():
 
 
 def test_auto_reconnect_keeps_fallback_state():
-    source = (ROOT / "src/services/a2dp/A2DPManager.cpp").read_text(encoding="utf-8")
+    source = text("src/services/a2dp/A2DPManager.cpp")
     assert '_autoMode = true;' in source and '_fallbackName = name;' in source and '_fallbackAttempted = false;' in source
-    assert '_pendingRetries = 1;' in source
+    assert '_pendingRetries = 0;' in source
+    assert 'beginShutdown(ShutdownReason::ConnectFailed, fallbackName);' in source
 
 
 def test_compile_regressions_fixed():
@@ -171,7 +195,7 @@ def test_a2dp_timeout_restores_classic_before_failure_event():
     marker = '"A2DP connection timeout after'
     start = source.index(marker)
     timeout = source[start:]
-    assert '_source.stop();' in timeout
-    assert '_bluetooth.classic.restoreAfterA2dp();' in timeout
-    assert '_events.publish({EventType::A2dpConnectFailed' in timeout
-    assert timeout.index('_source.stop();') < timeout.index('_events.publish({EventType::A2dpConnectFailed')
+    assert 'beginShutdown(ShutdownReason::ConnectFailed' in timeout
+    assert '_source.beginStop();' in source
+    assert '_bluetooth.classic.restoreAfterA2dp();' in source
+    assert timeout.index('beginShutdown(ShutdownReason::ConnectFailed') < len(timeout)

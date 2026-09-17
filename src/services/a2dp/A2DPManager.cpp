@@ -102,6 +102,8 @@ void A2DPManager::resetRuntimeState() {
     _connectionState = 0xFF;
     _audioState = 0xFF;
     _lastStatsLogMs = 0;
+    _shutdownReason = ShutdownReason::None;
+    _shutdownFallbackName = "";
 }
 
 void A2DPManager::configureCallbacks() {
@@ -403,9 +405,6 @@ void A2DPManager::applyPendingCallbacks() {
         _classicFoundPending = true;
     }
 
-    // Media state is processed before connection teardown so a simultaneous
-    // AUDIO_STARTED/DISCONNECTED callback pair cannot erase evidence that the
-    // link actually entered the streaming state.
     if (audioState != 0xFF) {
         _audioState = audioState;
 
@@ -473,7 +472,8 @@ Result<void> A2DPManager::connectByAddress(const String& address) {
     if (_state == ConnectionState::Connecting ||
         _state == ConnectionState::Connected ||
         _state == ConnectionState::Streaming ||
-        _pendingConnection != PendingConnection::None) {
+        _pendingConnection != PendingConnection::None ||
+        _shutdownReason != ShutdownReason::None) {
         return Result<void>::fail(ErrorCode::Busy);
     }
 
@@ -494,7 +494,8 @@ Result<void> A2DPManager::connectByName(const String& name) {
     if (_state == ConnectionState::Connecting ||
         _state == ConnectionState::Connected ||
         _state == ConnectionState::Streaming ||
-        _pendingConnection != PendingConnection::None) {
+        _pendingConnection != PendingConnection::None ||
+        _shutdownReason != ShutdownReason::None) {
         return Result<void>::fail(ErrorCode::Busy);
     }
 
@@ -506,7 +507,8 @@ Result<void> A2DPManager::connectAuto() {
     if (_state == ConnectionState::Connecting ||
         _state == ConnectionState::Connected ||
         _state == ConnectionState::Streaming ||
-        _pendingConnection != PendingConnection::None) {
+        _pendingConnection != PendingConnection::None ||
+        _shutdownReason != ShutdownReason::None) {
         return Result<void>::fail(ErrorCode::Busy);
     }
 
@@ -533,12 +535,10 @@ Result<void> A2DPManager::connectAuto() {
         _fallbackName = name;
         _fallbackAttempted = false;
         memcpy(_pendingTargetAddress, parsed, sizeof(_pendingTargetAddress));
-        // ESP32-A2DP v1.8.10 performs auto-reconnect attempts on 10 s
-        // heartbeats and starts inquiry only after retries are exhausted.
-        // Three retries would push the library's discovery fallback beyond
-        // this manager's 60 s connection deadline. One retry leaves time for
-        // the library-owned Classic name discovery inside that deadline.
-        _pendingRetries = 1;
+        // ESP32-A2DP v1.8.10 performs reconnect logic on heartbeat events.
+        // Zero retries intentionally skips direct MAC retry and lets the
+        // library fall back to its Classic name inquiry on the first heartbeat.
+        _pendingRetries = 0;
         _logger.info("A2DP auto-connect queued for cached Classic MAC %s", mac.c_str());
         return Result<void>::ok();
     }
@@ -588,8 +588,8 @@ void A2DPManager::processPendingConnection() {
         _logger.info(
             "A2DP source start: address=%s, retries=%d",
             address.c_str(),
-            retries > 0 ? retries : 3);
-        result = _source.startByAddress(targetAddress, retries > 0 ? retries : 3);
+            retries >= 0 ? retries : 3);
+        result = _source.startByAddress(targetAddress, retries >= 0 ? retries : 3);
 
         if (result.success) {
             _state = ConnectionState::Connecting;
@@ -624,6 +624,79 @@ void A2DPManager::processPendingConnection() {
         _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
         _bluetooth.classic.restoreAfterA2dp();
     }
+}
+
+void A2DPManager::beginShutdown(
+    ShutdownReason reason,
+    const String& fallbackName) {
+    if (reason == ShutdownReason::None ||
+        _shutdownReason != ShutdownReason::None) {
+        return;
+    }
+
+    _shutdownReason = reason;
+    _shutdownFallbackName = fallbackName;
+    _state = ConnectionState::Disconnecting;
+    _connectStart = 0;
+    _disconnectCandidate = false;
+    _disconnectHadAudio = false;
+    _mediaCheckPending = false;
+    _pendingConnection = PendingConnection::None;
+    _pendingAddress = "";
+    _pendingName = "";
+
+    _audio.stop();
+    portENTER_CRITICAL(&_callbackMux);
+    _tone = false;
+    portEXIT_CRITICAL(&_callbackMux);
+
+    _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
+    _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
+
+    _source.beginStop();
+}
+
+bool A2DPManager::processShutdown() {
+    if (_shutdownReason == ShutdownReason::None) {
+        return false;
+    }
+
+    if (!_source.finishStop()) {
+        return true;
+    }
+
+    _bluetooth.classic.restoreAfterA2dp();
+
+    const ShutdownReason reason = _shutdownReason;
+    const String fallbackName = _shutdownFallbackName;
+    _shutdownReason = ShutdownReason::None;
+    _shutdownFallbackName = "";
+
+    _state = ConnectionState::Disconnected;
+    _connectStart = 0;
+    _disconnectCandidate = false;
+    _disconnectHadAudio = false;
+    _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
+    _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
+    _audio.stop();
+
+    if (fallbackName.length()) {
+        _autoMode = false;
+        _fallbackAttempted = true;
+        _logger.info(
+            "A2DP source stopped; starting Classic name fallback '%s'",
+            fallbackName.c_str());
+        queueNameConnection(fallbackName);
+    }
+    else if (reason == ShutdownReason::Disconnect) {
+        publishAddressEvent(EventType::A2dpDisconnected, _remoteAddress);
+    }
+    else {
+        _autoMode = false;
+        _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
+    }
+
+    return true;
 }
 
 Result<void> A2DPManager::startTone() {
@@ -706,25 +779,12 @@ Result<void> A2DPManager::disconnect() {
         return Result<void>::ok();
     }
 
-    if (_state == ConnectionState::Disconnected) {
+    if (_shutdownReason != ShutdownReason::None ||
+        _state == ConnectionState::Disconnected) {
         return Result<void>::ok();
     }
 
-    _state = ConnectionState::Disconnecting;
-    portENTER_CRITICAL(&_callbackMux);
-    _tone = false;
-    portEXIT_CRITICAL(&_callbackMux);
-    _audio.stop();
-    _pendingConnection = PendingConnection::None;
-    _pendingAddress = "";
-    _pendingName = "";
-    _source.stop();
-    _bluetooth.classic.restoreAfterA2dp();
-
-    _state = ConnectionState::Disconnected;
-    _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
-    _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
-    publishAddressEvent(EventType::A2dpDisconnected, _remoteAddress);
+    beginShutdown(ShutdownReason::Disconnect, "");
     return Result<void>::ok();
 }
 
@@ -775,6 +835,10 @@ AudioStatus A2DPManager::audioStatus() const {
 }
 
 void A2DPManager::update() {
+    if (processShutdown()) {
+        return;
+    }
+
     processPendingConnection();
     applyPendingCallbacks();
 
@@ -795,7 +859,7 @@ void A2DPManager::update() {
 
         _logger.info(
             "A2DP link connected: %s",
-            _remoteAddress.length() ? _remoteAddress.c_str() :"UNKNOWN");
+            _remoteAddress.length() ? _remoteAddress.c_str() : "UNKNOWN");
     }
 
     if (_audioStartedPending) {
@@ -849,22 +913,22 @@ void A2DPManager::update() {
         _disconnectCandidate = false;
 
         if (!_disconnectHadAudio && _state != ConnectionState::Streaming) {
-            _state = ConnectionState::Disconnected;
-            portENTER_CRITICAL(&_callbackMux);
-            _tone = false;
-            portEXIT_CRITICAL(&_callbackMux);
-            _audio.stop();
-            _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
-            _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
-            _events.publish({EventType::A2dpDisconnected, nullptr, 0});
-            _logger.warn("A2DP link disconnected: %s", _remoteAddress.c_str());
+            String fallbackName;
+            const bool fallback =
+                _autoMode && !_fallbackAttempted && _fallbackName.length();
 
-            if (_autoMode && !_fallbackAttempted && _fallbackName.length()) {
+            if (fallback) {
                 _fallbackAttempted = true;
-                const String fallbackName = _fallbackName;
+                fallbackName = _fallbackName;
                 _autoMode = false;
-                connectByName(fallbackName);
+                beginShutdown(ShutdownReason::ConnectFailed, fallbackName);
             }
+            else {
+                _autoMode = false;
+                beginShutdown(ShutdownReason::Disconnect, "");
+            }
+
+            return;
         }
     }
 
@@ -909,31 +973,20 @@ void A2DPManager::update() {
         _connectStart != 0 &&
         static_cast<uint32_t>(millis() - _connectStart) >=
         config::A2DP_CONNECT_TIMEOUT_MS) {
-        _logger.error(
-            "A2DP connection timeout after %lu ms; stopping A2DP and restoring Classic Bluetooth",
-            static_cast<unsigned long>(millis() - _connectStart));
-        _source.stop();
-        _bluetooth.classic.restoreAfterA2dp();
-        _state = ConnectionState::Disconnected;
-        _connectStart = 0;
-        _disconnectCandidate = false;
-        _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
-        _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
-        _audio.stop();
-        portENTER_CRITICAL(&_callbackMux);
-        _tone = false;
-        portEXIT_CRITICAL(&_callbackMux);
-        _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
+        const bool fallback =
+            _autoMode && !_fallbackAttempted && _fallbackName.length();
+        const String fallbackName = fallback ? _fallbackName : String();
 
-        if (_autoMode && !_fallbackAttempted && _fallbackName.length()) {
+        _logger.error(
+            "A2DP connection timeout after %lu ms; stopping A2DP asynchronously",
+            static_cast<unsigned long>(millis() - _connectStart));
+
+        if (fallback) {
             _fallbackAttempted = true;
-            const String fallbackName = _fallbackName;
-            _autoMode = false;
-            connectByName(fallbackName);
-        }
-        else {
             _autoMode = false;
         }
+
+        beginShutdown(ShutdownReason::ConnectFailed, fallbackName);
     }
 }
 

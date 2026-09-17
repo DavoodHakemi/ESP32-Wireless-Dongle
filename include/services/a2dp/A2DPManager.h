@@ -95,6 +95,15 @@ private:
     void publishAddressEvent(EventType type, const String& address);
     void resetRuntimeState();
 
+    enum class ShutdownReason : uint8_t {
+        None,
+        Disconnect,
+        ConnectFailed
+    };
+
+    void beginShutdown(ShutdownReason reason, const String& fallbackName);
+    bool processShutdown();
+
     // Callback-owned notification state. Callbacks only record state here;
     // the application task consumes it from applyPendingCallbacks().
     uint8_t _pendingConnectionState{0xFF};
@@ -119,5 +128,7 @@ private:
     String _pendingName;
     uint8_t _pendingTargetAddress[6]{};
     int _pendingRetries{3};
+    ShutdownReason _shutdownReason{ShutdownReason::None};
+    String _shutdownFallbackName;
 };
 }
