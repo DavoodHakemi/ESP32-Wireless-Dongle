@@ -1,0 +1,58 @@
+v2.1.11 - Audio stability / transport batching
+- Decoupled WASAPI capture from UART transmission with a bounded audio queue.
+- Batched up to 6 ADPCM blocks per serial frame to reduce per-frame overhead.
+- Increased ESP32 compressed-audio ring buffer to 24 KiB and startup prebuffer to 24 blocks.
+- Switched continuous capture to 1024-frame reads with a 4096-frame WASAPI blocksize.
+- Suppressed repetitive recoverable SoundCard discontinuity warning spam during streaming.
+
+v2.1.8 - WASAPI real-audio monitor and version consistency fixes
+
+- Fixed Windows menu option 29 so it actually runs the real-audio WASAPI monitor instead of exiting the program.
+- Added an explicit 9-second diagnostic window while monitoring the three detected loopbacks (3 seconds each).
+- Kept generated-tone self-test separate from real application routing detection.
+- Synchronized Firmware GET_VERSION, Windows EXPECTED_FIRMWARE_VERSION, UI, README, VERSION and protocol metadata to 2.1.8.
+- Preserved the explicit loopback selection path used by PC audio streaming.
+
+- Fixed SoundCard 0.4.6 calls: removed unsupported exclude_monitors argument.
+- Fixed channel count handling because SoundCard exposes channels as an integer on Windows.
+- Explicitly selected loopback devices are now honored by the PC audio streamer.
+- Added persistent-in-session manual loopback selection.
+- Automatic routing prefers the current Windows default output when it has signal.
+
+v2.1.8 - WASAPI default-output to loopback routing fix
+- Resolve the current Windows default WASAPI output explicitly.
+- Map that output to its WASAPI loopback analogue before capture.
+- Keep 921600-baud UART, IMA ADPCM, A2DP, Wi-Fi, TCP/UDP, SPP and BLE features unchanged.
+- Add a WASAPI capture-path diagnostic menu item.
+
+ESP32 Wireless Dongle - PC Audio Release Notes
+================================================
+
+v2.1.8 - Stable 921600-baud UART transport
+
+- Fixed the complete UART transport at 921,600 baud.
+- Disabled XON/XOFF, RTS/CTS and DSR/DTR flow control explicitly in the Windows serial layer.
+- Added a short post-open settle time and input/output buffer purge so ESP32 boot/reset bytes cannot corrupt the first binary frame.
+- Firmware now explicitly uses 8N1 at 921,600 baud.
+- Added 4-bit IMA ADPCM transport for Windows PC audio.
+- Windows captures 44.1 kHz stereo 16-bit PCM and encodes it in 512-frame blocks.
+- ESP32 decodes each block back to 44.1 kHz stereo 16-bit PCM before A2DP encoding.
+- One audio transport block is 522 bytes and carries 512 stereo frames.
+- Effective audio payload is about 359.7 kbit/s, plus protocol overhead.
+- Reduced the ESP32 compressed-audio ring to 8192 bytes to stay comfortably inside the ESP32-WROOM-32 internal DRAM budget.
+- Kept the wire protocol version at 0x01 for backward compatibility.
+- Preserved all Wi-Fi, TCP, UDP, Classic SPP, Classic GAP, BLE scan, A2DP, cached-target reconnect and test-tone functionality.
+
+v2.0.4
+- Fixed Arduino-ESP32 3.0.7 compilation error caused by passing volatile audioUnderruns
+  directly to memcpy().
+- Fixed transport at 921,600 baud.
+
+v2.0.3
+- Reduced the previous raw PCM ring buffer to fit ESP32-WROOM-32 DRAM.
+
+v2.0.0
+- Added the initial Windows WASAPI PC-audio bridge and AUDIO_START/AUDIO_STOP/AUDIO_STATUS
+  command family.
+
+2.1.11 - Audio stability improvements: decoupled WASAPI capture from UART sender, 6-block UART batching, larger ESP32 audio ring/prebuffer, and reduced warning flood.

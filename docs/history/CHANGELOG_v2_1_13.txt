@@ -1,0 +1,9 @@
+ESP32 Wireless Dongle v2.1.13
+
+Audio stability and quality refinement:
+- Two ADPCM blocks per UART audio frame to reduce framing overhead without large bursts.
+- 6x fixed PCM gain before int16 quantization to improve ADPCM SNR on the affected Windows capture path.
+- Windows capture queue increased to 256 blocks.
+- ESP32 UART parser budget increased to 1024 bytes/loop.
+- ESP32 audio prebuffer increased to 40 blocks.
+- Existing Wi-Fi, TCP/UDP, Bluetooth, BLE, SPP, A2DP, and 921600 baud transport retained.

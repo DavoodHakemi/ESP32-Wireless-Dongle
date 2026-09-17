@@ -1,0 +1,10 @@
+v2.2.2
+
+- Fixed PC audio prebuffer deadlock: prebuffer is now calculated dynamically and never exceeds the ring capacity.
+- Introduced transport-independent audio stream configuration/profile.
+- Added runtime PC audio format selection: 11025/22050/44100 Hz, mono/stereo, 16-bit.
+- Default profile remains 22050 Hz mono 16-bit raw PCM.
+- Removed hard-coded PCM mode assumptions from the PC audio control path.
+- Added AudioPacketSink abstraction in firmware so Serial and future SPI ingress can feed the same audio engine.
+- Kept raw PCM uncompressed; no ADPCM in the active audio path.
+- Preserved existing Wi-Fi, TCP/UDP, Bluetooth, BLE, SPP and A2DP functionality.

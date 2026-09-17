@@ -1,0 +1,5 @@
+ESP32 Wireless Dongle v2.2.7
+
+- Fixed the 64-sample A2DP test-tone wavetable initializer.
+- Preserved all existing Wi-Fi, networking, Bluetooth, A2DP and PC-audio functionality.
+- Firmware and Windows-side version references updated to 2.2.7.

@@ -1,0 +1,7 @@
+ESP32 Wireless Dongle v2.2.4
+
+- Fixed missing declarations for A2DP media callback diagnostic counters.
+- Reset A2DP media callback counters when the A2DP session stops.
+- Preserved the v2.2.3 A2DP media-path changes.
+- Preserved existing Wi-Fi, TCP, UDP, Bluetooth Classic, BLE, SPP, A2DP, and PC-audio functionality.
+- Synchronized primary version strings to v2.2.4.

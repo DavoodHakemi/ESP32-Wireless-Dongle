@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "*.ino": "cpp",
+        "*.h": "cpp"
+    },
+    "C_Cpp.default.cppStandard": "gnu++17",
+    "C_Cpp.default.cStandard": "c17",
+    "C_Cpp.default.includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/src"
+    ]
+}

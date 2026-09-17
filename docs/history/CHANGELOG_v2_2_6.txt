@@ -1,0 +1,11 @@
+ESP32 Wireless Dongle v2.2.7
+
+Audio continuity and A2DP callback stability update.
+
+Changes:
+- Reduced internal PCM transport block size from 1000 to 256 samples/channel to reduce UART burstiness and latency.
+- Reduced Windows WASAPI capture chunk size from 2048 to 1024 frames to provide more regular PCM packets.
+- Reduced SoundCard recorder block size from 8192 to 2048 frames.
+- Replaced real-time sinf() test-tone generation with a deterministic wavetable/phase-accumulator path.
+- Added A2DP media callback count and byte counters to AUDIO_STATUS for diagnostics.
+- Preserved Wi-Fi, TCP, UDP, Bluetooth Classic/BLE, SPP, A2DP reconnect, and PC-audio features.

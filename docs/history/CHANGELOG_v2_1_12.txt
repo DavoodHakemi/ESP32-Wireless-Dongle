@@ -1,0 +1,7 @@
+ESP32 Wireless Dongle v2.1.12
+
+- Reverted PC audio transport to one ADPCM block per UART frame for smoother pacing.
+- Increased ESP32 audio ring buffer to 32 KiB.
+- Kept 30-block prebuffer.
+- Preserved all existing Wi-Fi, TCP/UDP, Bluetooth Classic/BLE/SPP, A2DP, tone and protocol features.
+- Kept UART fixed at 921600 baud and IMA ADPCM transport.

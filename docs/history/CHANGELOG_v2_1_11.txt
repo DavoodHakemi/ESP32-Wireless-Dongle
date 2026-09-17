@@ -1,0 +1,10 @@
+ESP32 Wireless Dongle v2.1.12
+
+Audio stability update:
+- Limit ESP32 UART parsing to 512 bytes per loop iteration so A2DP/network/Bluetooth processing is not starved.
+- Increase PC-side ADPCM batching to 7 blocks per UART frame.
+- Allow the sender to wait for a fuller batch to reduce UART packet overhead and jitter.
+- Increase PC capture queue capacity to absorb scheduling jitter.
+- Increase ESP32 audio prebuffer to 30 ADPCM blocks before A2DP starts consuming PC audio.
+- Increase AUDIO_STATUS request timeout to 5 seconds.
+- Preserve existing Wi-Fi, TCP/UDP, Classic Bluetooth, BLE, SPP, A2DP, test tone, and protocol features.

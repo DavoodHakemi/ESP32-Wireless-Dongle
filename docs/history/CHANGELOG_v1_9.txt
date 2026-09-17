@@ -1,0 +1,13 @@
+ESP32 Wireless Dongle - Changelog v1.9.0
+BT-07 A2DP reconnect/cache hardening
+
+- Kept all existing Wi-Fi, TCP, UDP, Classic SPP, Classic GAP, BLE scan and A2DP commands.
+- Added persistent NVS cache for the verified Classic A2DP target MAC and target name.
+- Added A2DP_CONNECT_AUTO (0x67): cached Classic MAC first, then one name-based fallback.
+- Added A2DP_CLEAR_CACHE (0x68).
+- Added A2DP_GET_CACHE (0x69).
+- Kept the legacy A2DP_GET_INFO (0x60) response layout unchanged for compatibility.
+- Target cache is written after a successful A2DP connection, never from the BLE MAC.
+- Default automatic target name is "QCY T13 ANC2".
+- Windows utility updated to v1.9.0 and adds automatic reconnect plus cache diagnostics/reset.
+- Firmware GET_VERSION and Windows UI version are synchronized at 1.9.0.

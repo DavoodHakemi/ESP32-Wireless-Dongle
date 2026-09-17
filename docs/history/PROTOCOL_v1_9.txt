@@ -1,0 +1,61 @@
+ESP32 Wireless Dongle Protocol v1.9.0
+
+Transport
+- UART0 / CP2102
+- 115200 baud
+- Existing frame format unchanged
+- Protocol version byte remains 0x01 for backward compatibility
+
+A2DP commands
+0x60 A2DP_GET_INFO
+  Legacy response layout unchanged: 23 bytes
+    [0] active
+    [1] connecting
+    [2] test tone enabled
+    [3] connection state
+    [4] audio state
+    [5] current target MAC length (0 or 17)
+    [6..22] current Classic MAC
+
+0x61 A2DP_CONNECT
+  Legacy/manual path. Payload: 17-byte Classic MAC ASCII.
+  Never pass a BLE advertisement MAC.
+
+0x62 A2DP_TEST_TONE
+0x63 A2DP_STOP_TONE
+0x64 A2DP_DISCONNECT
+0x65 A2DP_STATUS
+0x66 A2DP_CONNECT_NAME
+  Payload: 1..64 UTF-8 bytes; matches Classic Bluetooth name prefix.
+
+0x67 A2DP_CONNECT_AUTO [new v1.9]
+  Request: empty.
+  Behavior: try the persistent verified Classic MAC first; if that attempt times out, retry once by the cached/default Classic name.
+  Default name: "QCY T13 ANC2".
+
+0x68 A2DP_CLEAR_CACHE [new v1.9]
+  Request: empty. Clears persistent Classic target cache.
+
+0x69 A2DP_GET_CACHE [new v1.9]
+  Request: empty.
+  Response: 35 bytes
+    [0] cached MAC length (0 or 17)
+    [1..17] cached Classic MAC
+    [18] cached name length (0..16)
+    [19..34] cached target name
+
+A2DP events
+0x70 CONNECTING
+0x71 CONNECTED
+0x72 AUDIO_STARTED
+0x73 AUDIO_STOPPED
+0x74 DISCONNECTED
+0x75 CONNECT_FAIL
+0x76 CLASSIC_FOUND
+
+Important address rule
+- BLE and Classic Bluetooth addresses may differ.
+- Observed for QCY T13 ANC2:
+    BLE APP:    84:AC:60:6E:1A:89
+    Classic:    84:AC:60:0C:7D:CF
+- Only the verified Classic A2DP address is cached.

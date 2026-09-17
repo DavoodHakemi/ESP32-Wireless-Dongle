@@ -1,0 +1,7 @@
+v2.2.0
+- Changed PC audio transport to raw PCM16 mono at 22.05 kHz.
+- Removed ADPCM compression from the PC-audio path.
+- 22.05 kHz mono at 16-bit requires about 44.1 kB/s before protocol overhead, well within 921600 baud.
+- ESP32 duplicates each mono sample to left/right and emits 44.1 kHz stereo PCM to A2DP.
+- Increased raw PCM block to 1024 samples (2051-byte audio payload including header).
+- Existing Wi-Fi, TCP/UDP, Bluetooth Classic, SPP, BLE, A2DP and test-tone features retained.

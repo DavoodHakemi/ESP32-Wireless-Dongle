@@ -1,0 +1,12 @@
+ESP32 Wireless Dongle v2.2.3
+==============================
+
+A2DP media-path regression fix and diagnostics.
+
+Changes:
+- Restored the proven v1.9-style A2DP test-tone callback path.
+- Test tone is generated whenever tone mode is enabled, independently of PC audio buffering.
+- A2DPSource volume is explicitly set to 127 when the source starts.
+- A2DP status now reports the library-reported connection/audio state.
+- Added internal A2DP audio callback counters for firmware diagnostics.
+- Preserves Wi-Fi, TCP, UDP, Classic SPP, Classic GAP scan, BLE scan, cached A2DP reconnect, and PC-audio architecture.

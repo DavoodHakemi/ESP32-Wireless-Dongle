@@ -1,0 +1,6 @@
+ESP32 Wireless Dongle v2.2.2
+
+- Fixed Arduino IDE 1.8.19 prototype-order errors for BtBleScanEntry and BtGapScanEntry.
+- Restored missing A2DP connection/audio state callbacks required by ESP32-A2DP.
+- Preserved transport-independent audio architecture from v2.2.1.
+- No Wi-Fi, TCP, UDP, SPP, BLE, A2DP target discovery, or audio profile behavior was intentionally removed.
