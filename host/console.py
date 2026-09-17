@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import sys
 import time
 from typing import Any
 
@@ -46,7 +47,7 @@ def _console_print(
     file: Any = None,
     flush: bool = False,
 ) -> None:
-    target = builtins.sys.stdout if file is None else file
+    target = sys.stdout if file is None else file
     text = sep.join(str(value) for value in values)
     lines = text.splitlines()
 
@@ -70,7 +71,7 @@ def _console_input(prompt: str = "") -> str:
             str(prompt).rstrip("\r\n"),
             log_type="Prompt",
             end="",
-            file=builtins.sys.stdout,
+            file=sys.stdout,
             flush=True,
         )
     return _ORIGINAL_INPUT()
