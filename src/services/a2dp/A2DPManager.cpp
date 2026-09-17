@@ -438,7 +438,7 @@ void A2DPManager::applyPendingCallbacks() {
             _mediaAttempts = 0;
             _connectStart = 0;
         }
-        else if (connectionState == ESP_A2DP_CONNECTION_STATE_DISCONNECTED) {
+        else if (connectionState == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             _disconnectCandidate = true;
             _disconnectSince = millis();
             if (_state == ConnectionState::Streaming ||
