@@ -1,3 +1,21 @@
+# Changelog
+
+## 2.3.9
+
+- Restored `BluetoothA2DPSource::start()` to the main application loop; the A2DP library already owns its internal FreeRTOS worker task.
+
+- Hardened timeout cleanup so A2DP is stopped and Bluetooth Classic is restored before the connection-failure event is emitted.
+
+- Added runtime diagnostics for cached A2DP target selection and source-start mode.
+
+
+## 2.3.8
+
+- Made A2DP source startup asynchronous using a one-shot FreeRTOS task.
+- Prevented the A2DP library startup delay from blocking the application command loop.
+- Preserved address/name reconnect behavior and cancellation handling.
+- Kept the existing protocol response timing so A2DP connect commands can acknowledge immediately.
+
 ## 2.3.5
 - Hold queued asynchronous events until the initial GET_INFO protocol handshake completes.
 - Prevent startup log/event traffic from racing with initial request/response exchange.

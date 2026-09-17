@@ -27,3 +27,6 @@ pio device monitor -p COM5 -b 921600
 ## Verification status
 
 Static architecture tests and Python syntax checks are run before packaging. A full PlatformIO compile/link is not executed in this packaging environment because the PlatformIO toolchain/package cache is unavailable here. Hardware regression testing must therefore be performed in the user's PlatformIO environment.
+
+## Runtime note
+A2DP source startup is asynchronous in the modular architecture; the protocol acknowledgement is returned without blocking the main application loop.

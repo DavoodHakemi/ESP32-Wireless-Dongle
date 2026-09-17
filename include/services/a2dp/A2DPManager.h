@@ -158,6 +158,22 @@ private:
     void handleAudio(esp_a2d_audio_state_t);
     void publishAddressEvent(EventType type, const String& address);
     void resetRuntimeState();
+    enum class PendingConnection : uint8_t {
+        None,
+        Address,
+        Name,
+        Auto
+    };
+
     void cacheTarget();
+    bool queueAddressConnection(const String& address, const uint8_t parsed[6], int retries);
+    bool queueNameConnection(const String& name);
+    void processPendingConnection();
+    bool _preferencesReady{false};
+    PendingConnection _pendingConnection{PendingConnection::None};
+    String _pendingAddress;
+    String _pendingName;
+    uint8_t _pendingTargetAddress[6]{};
+    int _pendingRetries{3};
 };
 }

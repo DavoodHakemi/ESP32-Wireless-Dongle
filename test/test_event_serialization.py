@@ -27,8 +27,8 @@ def test_event_queue_is_fixed_size_and_copies_payloads():
 def test_firmware_version_is_consistent():
     version = (ROOT / "VERSION.txt").read_text().strip()
     header = (ROOT / "include/config/Version.h").read_text()
-    assert version == "2.3.5"
-    assert '#define DONGLE_FIRMWARE_VERSION "2.3.5"' in header
+    assert version == "2.3.9"
+    assert '#define DONGLE_FIRMWARE_VERSION "2.3.9"' in header
 
 
 def test_boot_events_are_held_until_protocol_handshake():

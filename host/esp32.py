@@ -5,6 +5,7 @@ from collections import deque
 from typing import Optional
 
 from frame import (
+    TYPE_ERROR,
     Frame,
     FrameParser,
     TYPE_EVENT,
@@ -144,6 +145,7 @@ class Esp32Device:
         self._rx_stop = threading.Event()
         self._rx_condition = threading.Condition()
         self._rx_thread: threading.Thread | None = None
+        self._request_lock = threading.Lock()
         self._rx_error: Exception | None = None
 
     def connect(self) -> None:
@@ -188,6 +190,10 @@ class Esp32Device:
                             with self._rx_condition:
                                 self.events.append(frame)
                                 self._rx_condition.notify_all()
+                    elif frame.frame_type == TYPE_ERROR:
+                        with self._rx_condition:
+                            self.responses.append(frame)
+                            self._rx_condition.notify_all()
                     elif frame.frame_type == TYPE_RESPONSE:
                         with self._rx_condition:
                             self.responses.append(frame)
@@ -228,22 +234,59 @@ class Esp32Device:
             self.events.clear()
             return items
 
-    def request(self, cmd: int, payload: bytes = b"", timeout: float = 2.0) -> Frame:
-        seq = self._next_sequence()
-        frame = build_frame(TYPE_REQUEST, cmd, seq, payload)
-        self.transport.write(frame)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            remaining = deadline - time.monotonic()
+    def request(
+        self,
+        cmd: int,
+        payload: bytes = b"",
+        timeout: float = 2.0,
+        retries: int = 0,
+    ) -> Frame:
+        with self._request_lock:
+            seq = self._next_sequence()
+            frame = build_frame(TYPE_REQUEST, cmd, seq, payload)
+
+            for attempt in range(retries + 1):
+                self.transport.write(frame)
+                deadline = time.monotonic() + timeout
+
+                while time.monotonic() < deadline:
+                    remaining = deadline - time.monotonic()
+                    with self._rx_condition:
+                        for idx, response in enumerate(self.responses):
+                            if response.seq == seq and response.cmd == cmd:
+                                del self.responses[idx]
+                                if response.frame_type == TYPE_ERROR:
+                                    raise RuntimeError(
+                                        f"Protocol error for command 0x{cmd:02X}: "
+                                        f"{response.payload.hex()}"
+                                    )
+                                return response
+
+                        if self._rx_error is not None:
+                            raise RuntimeError(
+                                f"UART reader stopped: {self._rx_error}"
+                            )
+
+                        self._rx_condition.wait(
+                            timeout=max(0.01, min(0.05, remaining))
+                        )
+
+                if attempt < retries:
+                    continue
+
+            stats = self.parser.stats
             with self._rx_condition:
-                for idx, response in enumerate(self.responses):
-                    if response.seq == seq and response.cmd == cmd:
-                        del self.responses[idx]
-                        return response
-                if self._rx_error is not None:
-                    raise RuntimeError(f"UART reader stopped: {self._rx_error}")
-                self._rx_condition.wait(timeout=max(0.01, min(0.05, remaining)))
-        raise TimeoutError(f"Timeout waiting for command 0x{cmd:02X}")
+                unmatched = [
+                    f"type=0x{frame.frame_type:02X},cmd=0x{frame.cmd:02X},seq={frame.seq}"
+                    for frame in list(self.responses)[-8:]
+                ]
+            detail = "; ".join(unmatched) if unmatched else "none"
+            raise TimeoutError(
+                f"Timeout waiting for command 0x{cmd:02X}; "
+                f"rx_frames={stats.frames_ok}, crc_errors={stats.crc_errors}, "
+                f"version_errors={stats.version_errors}, length_errors={stats.length_errors}; "
+                f"unmatched_responses={detail}"
+            )
 
     @staticmethod
     def _check_status(frame: Frame) -> bytes:
@@ -269,13 +312,13 @@ class Esp32Device:
     # --------------------------------------------------------
 
     def ping(self) -> str:
-        return self._check_status(self.request(CMD_PING)).decode("ascii", errors="replace")
+        return self._check_status(self.request(CMD_PING, timeout=3.0, retries=1)).decode("ascii", errors="replace")
 
     def get_version(self) -> str:
-        return self._check_status(self.request(CMD_GET_VERSION)).decode("ascii", errors="replace")
+        return self._check_status(self.request(CMD_GET_VERSION, timeout=3.0, retries=1)).decode("ascii", errors="replace")
 
     def get_info(self) -> dict:
-        payload = self._check_status(self.request(CMD_GET_INFO))
+        payload = self._check_status(self.request(CMD_GET_INFO, timeout=3.0, retries=2))
         if len(payload) < 7:
             raise RuntimeError("Invalid GET_INFO response")
         name_length = payload[0]
@@ -593,7 +636,7 @@ class Esp32Device:
             self.request(CMD_A2DP_CONNECT_NAME, encoded, timeout=timeout)
         )
 
-    def a2dp_connect_auto(self, timeout: float = 3.0) -> None:
+    def a2dp_connect_auto(self, timeout: float = 5.0) -> None:
         # Preferred reconnect path: the ESP32 tries its cached Classic MAC
         # first, then falls back to the cached/default device name.
         self._check_status(

@@ -45,7 +45,7 @@ def fail_line(name: str, detail: str) -> None:
     print(f"[FAIL] {name}: {detail}")
 
 
-EXPECTED_FIRMWARE_VERSION = "2.3.5"
+EXPECTED_FIRMWARE_VERSION = "2.3.9"
 
 
 def print_system_tests(device: Esp32Device) -> None:
@@ -927,7 +927,7 @@ def menu(device: Esp32Device) -> None:
     while True:
         print()
         separator()
-        print("ESP32 Wireless Dongle v2.3.5")
+        print(f"ESP32 Wireless Dongle v{EXPECTED_FIRMWARE_VERSION}")
         separator()
         print("1. Wi-Fi scan")
         print("2. Wi-Fi connect")

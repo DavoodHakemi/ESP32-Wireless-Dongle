@@ -93,3 +93,24 @@ def test_compile_regressions_fixed():
     assert 'Result<void> BluetoothClassic::begin()' in classic
     assert 'String cachedMac(); String cachedName();' in manager_h
     assert manager_cpp.count('\nvoid A2DPManager::update()') == 1
+
+
+def test_a2dp_source_start_uses_library_owned_task():
+    header = text("include/services/a2dp/A2DPSource.h")
+    source = text("src/services/a2dp/A2DPSource.cpp")
+    assert "freertos/task.h" not in header
+    assert "xTaskCreate(" not in source
+    assert "startTaskEntry" not in header
+    assert "runStartTask" not in header
+    assert source.count("_source.start();") == 2
+
+
+def test_a2dp_timeout_restores_classic_before_failure_event():
+    source = text("src/services/a2dp/A2DPManager.cpp")
+    marker = '"A2DP connection timeout after'
+    start = source.index(marker)
+    timeout = source[start:]
+    assert '_source.stop();' in timeout
+    assert '_bluetooth.classic.restoreAfterA2dp();' in timeout
+    assert '_events.publish({EventType::A2dpConnectFailed' in timeout
+    assert timeout.index('_source.stop();') < timeout.index('_events.publish({EventType::A2dpConnectFailed')

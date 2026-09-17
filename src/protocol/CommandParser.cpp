@@ -46,7 +46,7 @@ void CommandParser::feed(uint8_t byte) {
         break;
     case State::ReadHeader:
         _header[_headerIndex++] = byte;
-        if (_headerIndex == sizeof(_header)) {
+        if (_headerIndex == FRAME_HEADER_SIZE) {
             _expectedPayload = static_cast<uint16_t>(_header[4]) |
             (static_cast<uint16_t>(_header[5]) << 8);
             if (_expectedPayload > MAX_PAYLOAD) {
@@ -77,7 +77,8 @@ void CommandParser::processFrame() {
     (static_cast<uint16_t>(_header[5]) << 8);
     if (_header[0] != WIRE_VERSION ||
         _header[1] != static_cast<uint8_t>(FrameType::Request) ||
-        declared != _payloadIndex) {
+        declared != _payloadIndex ||
+        declared > MAX_FRAME_PAYLOAD) {
         return;
     }
 

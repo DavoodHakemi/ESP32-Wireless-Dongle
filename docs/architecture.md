@@ -45,3 +45,7 @@ The third-party A2DP library has a callback without a context for Classic name s
 ### Protocol framing
 
 `protocol/ProtocolFrame.h` owns SOF markers and `FrameType`, keeping transport-neutral wire framing separate from command IDs and response payload definitions.
+
+### Asynchronous A2DP startup
+
+The ESP32-A2DP library performs a startup delay while bringing up its Bluetooth/A2DP stack. `A2DPSourceAdapter` isolates this blocking third-party call in a one-shot FreeRTOS task so the application update loop and protocol command path remain responsive. The command returns an immediate acknowledgement while the A2DP state machine continues asynchronously.

@@ -18,7 +18,6 @@ A2DPManager::A2DPManager(
     IEventSink& events,
     services::bluetooth::BluetoothManager& bluetooth)
 : _logger(logger), _events(events), _bluetooth(bluetooth) {
-    _preferences.begin("a2dp", false);
     _callbackInstance = this;
 }
 
@@ -31,7 +30,15 @@ A2DPManager::~A2DPManager() {
 
 Result<void> A2DPManager::begin() {
     _state = ConnectionState::Disconnected;
-    return Result<void>::ok();
+    _pendingConnection = PendingConnection::None;
+
+    if (!_preferencesReady) {
+        _preferencesReady = _preferences.begin("a2dp", false);
+    }
+
+    return _preferencesReady
+        ? Result<void>::ok()
+        : Result<void>::fail(ErrorCode::HardwareError);
 }
 
 bool A2DPManager::parseAddress(const String& text, uint8_t out[6]) const {
@@ -59,6 +66,9 @@ bool A2DPManager::parseAddress(const String& text, uint8_t out[6]) const {
 void A2DPManager::resetRuntimeState() {
     _tone = false;
     _audio.stop();
+    _pendingConnection = PendingConnection::None;
+    _pendingAddress = "";
+    _pendingName = "";
     _connectionEventPending = false;
     _audioStartedPending = false;
     _audioStoppedPending = false;
@@ -106,11 +116,17 @@ void A2DPManager::cacheTarget() {
 }
 
 String A2DPManager::cachedMac() {
-    return _preferences.getString("classic_mac","");
+    if (!_preferencesReady) {
+        return String();
+    }
+    return _preferences.getString("classic_mac", "");
 }
 
 String A2DPManager::cachedName() {
-    return _preferences.getString("target_name","");
+    if (!_preferencesReady) {
+        return String();
+    }
+    return _preferences.getString("target_name", "");
 }
 
 void A2DPManager::clearCache() {
@@ -371,10 +387,31 @@ void A2DPManager::handleAudio(esp_a2d_audio_state_t state) {
     }
 }
 
+bool A2DPManager::queueAddressConnection(
+    const String& address,
+    const uint8_t parsed[6],
+    int retries) {
+    _pendingConnection = PendingConnection::Address;
+    _pendingAddress = address;
+    _pendingName = "";
+    memcpy(_pendingTargetAddress, parsed, sizeof(_pendingTargetAddress));
+    _pendingRetries = retries > 0 ? retries : 1;
+    return true;
+}
+
+bool A2DPManager::queueNameConnection(const String& name) {
+    _pendingConnection = PendingConnection::Name;
+    _pendingAddress = "";
+    _pendingName = name;
+    _pendingRetries = 0;
+    return true;
+}
+
 Result<void> A2DPManager::connectByAddress(const String& address) {
     if (_state == ConnectionState::Connecting ||
         _state == ConnectionState::Connected ||
-        _state == ConnectionState::Streaming) {
+        _state == ConnectionState::Streaming ||
+        _pendingConnection != PendingConnection::None) {
         return Result<void>::fail(ErrorCode::Busy);
     }
 
@@ -383,22 +420,7 @@ Result<void> A2DPManager::connectByAddress(const String& address) {
         return Result<void>::fail(ErrorCode::InvalidArgument);
     }
 
-    _bluetooth.classic.suspendForA2dp();
-    resetRuntimeState();
-
-    _remoteAddress = address;
-    _targetName ="";
-    _autoMode = false;
-    _fallbackAttempted = false;
-    _fallbackName ="";
-    memcpy(_targetAddress, parsed, sizeof(_targetAddress));
-
-    configureCallbacks();
-    _source.startByAddress(parsed, 3);
-
-    _state = ConnectionState::Connecting;
-    _connectStart = millis();
-    publishAddressEvent(EventType::A2dpConnecting, address);
+    queueAddressConnection(address, parsed, 3);
     return Result<void>::ok();
 }
 
@@ -409,45 +431,132 @@ Result<void> A2DPManager::connectByName(const String& name) {
 
     if (_state == ConnectionState::Connecting ||
         _state == ConnectionState::Connected ||
-        _state == ConnectionState::Streaming) {
+        _state == ConnectionState::Streaming ||
+        _pendingConnection != PendingConnection::None) {
         return Result<void>::fail(ErrorCode::Busy);
     }
 
-    _bluetooth.classic.suspendForA2dp();
-    resetRuntimeState();
-
-    _targetName = name;
-    _remoteAddress ="";
-    _autoMode = false;
-    _fallbackAttempted = false;
-    _fallbackName ="";
-
-    configureCallbacks();
-    _source.startByName();
-
-    _state = ConnectionState::Connecting;
-    _connectStart = millis();
+    queueNameConnection(name);
     return Result<void>::ok();
 }
 
 Result<void> A2DPManager::connectAuto() {
+    if (_state == ConnectionState::Connecting ||
+        _state == ConnectionState::Connected ||
+        _state == ConnectionState::Streaming ||
+        _pendingConnection != PendingConnection::None) {
+        return Result<void>::fail(ErrorCode::Busy);
+    }
+
     String mac = cachedMac();
     String name = cachedName();
     if (!name.length()) {
         name = config::A2DP_DEFAULT_TARGET_NAME;
     }
 
+    _logger.info(
+        "A2DP auto target: cached_mac=%s, target_name=%s",
+        mac.length() == 17 ? mac.c_str() : "(none)",
+        name.length() ? name.c_str() : "(none)");
+
     if (mac.length() == 17) {
-        auto result = connectByAddress(mac);
-        if (result.success) {
-            _autoMode = true;
-            _fallbackName = name;
-            _fallbackAttempted = false;
+        uint8_t parsed[6]{};
+        if (!parseAddress(mac, parsed)) {
+            return Result<void>::fail(ErrorCode::InvalidArgument);
         }
-        return result;
+        _pendingConnection = PendingConnection::Auto;
+        _pendingAddress = mac;
+        _pendingName = name;
+        _autoMode = true;
+        _fallbackName = name;
+        _fallbackAttempted = false;
+        memcpy(_pendingTargetAddress, parsed, sizeof(_pendingTargetAddress));
+        _pendingRetries = 3;
+        _logger.info("A2DP auto-connect queued for cached Classic MAC %s", mac.c_str());
+        return Result<void>::ok();
     }
 
-    return connectByName(name);
+    _pendingConnection = PendingConnection::Auto;
+    _pendingAddress = "";
+    _pendingName = name;
+    _pendingRetries = 0;
+    _logger.info("A2DP auto-connect queued for Classic name '%s'", name.c_str());
+    return Result<void>::ok();
+}
+
+void A2DPManager::processPendingConnection() {
+    if (_pendingConnection == PendingConnection::None) {
+        return;
+    }
+
+    const PendingConnection pending = _pendingConnection;
+    const String address = _pendingAddress;
+    const String name = _pendingName;
+    const int retries = _pendingRetries;
+    const uint8_t targetAddress[6] = {
+        _pendingTargetAddress[0], _pendingTargetAddress[1],
+        _pendingTargetAddress[2], _pendingTargetAddress[3],
+        _pendingTargetAddress[4], _pendingTargetAddress[5]
+    };
+
+    _pendingConnection = PendingConnection::None;
+    _pendingAddress = "";
+    _pendingName = "";
+
+    Result<void> result = Result<void>::ok();
+
+    if (pending == PendingConnection::Address ||
+        (pending == PendingConnection::Auto && address.length() == 17)) {
+        _bluetooth.classic.suspendForA2dp();
+        resetRuntimeState();
+
+        _remoteAddress = address;
+        _targetName = pending == PendingConnection::Auto ? name : "";
+        _autoMode = pending == PendingConnection::Auto;
+        _fallbackAttempted = false;
+        _fallbackName = pending == PendingConnection::Auto ? name : "";
+        memcpy(_targetAddress, targetAddress, sizeof(_targetAddress));
+
+        configureCallbacks();
+        _logger.info(
+            "A2DP source start: address=%s, retries=%d",
+            address.c_str(),
+            retries > 0 ? retries : 3);
+        result = _source.startByAddress(targetAddress, retries > 0 ? retries : 3);
+
+        if (result.success) {
+            _state = ConnectionState::Connecting;
+            _connectStart = millis();
+            publishAddressEvent(EventType::A2dpConnecting, _remoteAddress);
+        }
+    }
+    else {
+        _bluetooth.classic.suspendForA2dp();
+        resetRuntimeState();
+
+        _targetName = name;
+        _remoteAddress = "";
+        _autoMode = false;
+        _fallbackAttempted = false;
+        _fallbackName = "";
+
+        configureCallbacks();
+        _logger.info("A2DP source start: name='%s'", name.c_str());
+        result = _source.startByName();
+
+        if (result.success) {
+            _state = ConnectionState::Connecting;
+            _connectStart = millis();
+        }
+    }
+
+    if (!result.success) {
+        _logger.error(
+            "A2DP connection start failed: error=%d",
+            static_cast<int>(result.error));
+        _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
+        _bluetooth.classic.restoreAfterA2dp();
+    }
 }
 
 Result<void> A2DPManager::startTone() {
@@ -516,6 +625,13 @@ Result<void> A2DPManager::pushAudioData(
 }
 
 Result<void> A2DPManager::disconnect() {
+    if (_pendingConnection != PendingConnection::None) {
+        _pendingConnection = PendingConnection::None;
+        _pendingAddress = "";
+        _pendingName = "";
+        return Result<void>::ok();
+    }
+
     if (_state == ConnectionState::Disconnected) {
         return Result<void>::ok();
     }
@@ -523,6 +639,9 @@ Result<void> A2DPManager::disconnect() {
     _state = ConnectionState::Disconnecting;
     _tone = false;
     _audio.stop();
+    _pendingConnection = PendingConnection::None;
+    _pendingAddress = "";
+    _pendingName = "";
     _source.stop();
     _bluetooth.classic.restoreAfterA2dp();
 
@@ -567,6 +686,8 @@ AudioStatus A2DPManager::audioStatus() const {
 }
 
 void A2DPManager::update() {
+    processPendingConnection();
+
     if (_classicFoundPending) {
         _classicFoundPending = false;
         publishAddressEvent(EventType::A2dpClassicFound, _remoteAddress);
@@ -676,11 +797,19 @@ void A2DPManager::update() {
         _connectStart != 0 &&
         static_cast<uint32_t>(millis() - _connectStart) >=
         config::A2DP_CONNECT_TIMEOUT_MS) {
-        _state = ConnectionState::Error;
-        _logger.error("A2DP connection timeout");
-        _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
+        _logger.error(
+            "A2DP connection timeout after %lu ms; stopping A2DP and restoring Classic Bluetooth",
+            static_cast<unsigned long>(millis() - _connectStart));
         _source.stop();
         _bluetooth.classic.restoreAfterA2dp();
+        _state = ConnectionState::Disconnected;
+        _connectStart = 0;
+        _disconnectCandidate = false;
+        _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
+        _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
+        _audio.stop();
+        _tone = false;
+        _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
 
         if (_autoMode && !_fallbackAttempted && _fallbackName.length()) {
             _fallbackAttempted = true;
