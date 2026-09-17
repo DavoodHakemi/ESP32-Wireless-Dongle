@@ -1,6 +1,7 @@
 #pragma once
 #include <Preferences.h>
 #include <cstdint>
+#include <freertos/portmacro.h>
 #include "config/AppConfig.h"
 #include "core/Result.h"
 #include "core/Interfaces.h"
@@ -39,111 +40,45 @@ private:
     A2DPSourceAdapter _source;
     Preferences _preferences;
     AudioStreamBuffer _audio;
-    ConnectionState _state{
-        ConnectionState::Disconnected
-    };
-    bool _tone{
-        false
-    };
-    bool _autoMode{
-        false
-    };
-    bool _fallbackAttempted{
-        false
-    };
+    ConnectionState _state{ConnectionState::Disconnected};
+    bool _tone{false};
+    bool _autoMode{false};
+    bool _fallbackAttempted{false};
     String _fallbackName;
     String _targetName;
     String _remoteAddress;
     uint8_t _targetAddress[6]{};
-    uint8_t _connectionState{
-        0xFF
-    };
-    uint8_t _audioState{
-        0xFF
-    };
-    bool _connectionEventPending{
-        false
-    };
-    bool _audioStartedPending{
-        false
-    };
-    bool _audioStoppedPending{
-        false
-    };
-    bool _classicFoundPending{
-        false
-    };
-    bool _disconnectCandidate{
-        false
-    };
-    bool _disconnectHadAudio{
-        false
-    };
-    uint32_t _disconnectSince{
-        0
-    };
-    bool _mediaCheckPending{
-        false
-    };
-    uint32_t _mediaCheckDue{
-        0
-    };
-    uint8_t _mediaAttempts{
-        0
-    };
-    uint32_t _connectStart{
-        0
-    };
-    bool _pcmStartedPending{
-        false
-    };
-    bool _pcmStartedReported{
-        false
-    };
-    uint32_t _toneCommandMs{
-        0
-    };
+    uint8_t _connectionState{0xFF};
+    uint8_t _audioState{0xFF};
+    bool _connectionEventPending{false};
+    bool _audioStartedPending{false};
+    bool _audioStoppedPending{false};
+    bool _classicFoundPending{false};
+    bool _disconnectCandidate{false};
+    bool _disconnectHadAudio{false};
+    uint32_t _disconnectSince{0};
+    bool _mediaCheckPending{false};
+    uint32_t _mediaCheckDue{0};
+    uint8_t _mediaAttempts{0};
+    uint32_t _connectStart{0};
+    bool _pcmStartedPending{false};
+    bool _pcmStartedReported{false};
+    uint32_t _toneCommandMs{0};
     Frame _toneBuffer[config::A2DP_TONE_FRAMES]{};
-    uint16_t _toneIndex{
-        0
-    };
-    bool _toneReady{
-        false
-    };
+    uint16_t _toneIndex{0};
+    bool _toneReady{false};
     uint8_t _audioBlock[config::AUDIO_HEADER_BYTES + config::AUDIO_BLOCK_SAMPLES * 4]{};
-    bool _audioBlockLoaded{
-        false
-    };
-    uint16_t _audioSampleIndex{
-        0
-    };
-    uint8_t _audioRepeatPhase{
-        0
-    };
-    int16_t _audioLeft{
-        0
-    };
-    int16_t _audioRight{
-        0
-    };
-    volatile uint32_t _callbackCount{
-        0
-    };
-    volatile uint32_t _callbackBytes{
-        0
-    };
-    volatile uint32_t _lastCallbackMs{
-        0
-    };
-    volatile uint32_t _maxGapMs{
-        0
-    };
-    volatile uint32_t _stallCount{
-        0
-    };
-    uint32_t _lastStatsLogMs{
-        0
-    };
+    bool _audioBlockLoaded{false};
+    uint16_t _audioSampleIndex{0};
+    uint8_t _audioRepeatPhase{0};
+    int16_t _audioLeft{0};
+    int16_t _audioRight{0};
+    volatile uint32_t _callbackCount{0};
+    volatile uint32_t _callbackBytes{0};
+    volatile uint32_t _lastCallbackMs{0};
+    volatile uint32_t _maxGapMs{0};
+    volatile uint32_t _stallCount{0};
+    uint32_t _lastStatsLogMs{0};
 
     static A2DPManager* _callbackInstance;
     static bool nameSelector(const char*, esp_bd_addr_t, int);
@@ -156,8 +91,17 @@ private:
     bool fillFrames(Frame*, int32_t);
     void handleConnection(esp_a2d_connection_state_t);
     void handleAudio(esp_a2d_audio_state_t);
+    void applyPendingCallbacks();
     void publishAddressEvent(EventType type, const String& address);
     void resetRuntimeState();
+
+    // Callback-owned notification state. Callbacks only record state here;
+    // the application task consumes it from applyPendingCallbacks().
+    uint8_t _pendingConnectionState{0xFF};
+    uint8_t _pendingAudioState{0xFF};
+    uint8_t _pendingDiscoveredAddress[6]{};
+    portMUX_TYPE _callbackMux = portMUX_INITIALIZER_UNLOCKED;
+
     enum class PendingConnection : uint8_t {
         None,
         Address,
