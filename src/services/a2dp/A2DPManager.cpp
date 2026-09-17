@@ -64,8 +64,28 @@ bool A2DPManager::parseAddress(const String& text, uint8_t out[6]) const {
 }
 
 void A2DPManager::resetRuntimeState() {
-    _tone = false;
     _audio.stop();
+
+    portENTER_CRITICAL(&_callbackMux);
+    _tone = false;
+    _pendingConnectionState = 0xFF;
+    _pendingAudioState = 0xFF;
+    memset(_pendingDiscoveredAddress, 0, sizeof(_pendingDiscoveredAddress));
+    _callbackCount = 0;
+    _callbackBytes = 0;
+    _lastCallbackMs = 0;
+    _maxGapMs = 0;
+    _stallCount = 0;
+    _pcmStartedPending = false;
+    _pcmStartedReported = false;
+    _toneCommandMs = 0;
+    _audioBlockLoaded = false;
+    _audioSampleIndex = 0;
+    _audioRepeatPhase = 0;
+    _toneIndex = 0;
+    _toneReady = false;
+    portEXIT_CRITICAL(&_callbackMux);
+
     _pendingConnection = PendingConnection::None;
     _pendingAddress = "";
     _pendingName = "";
@@ -81,19 +101,7 @@ void A2DPManager::resetRuntimeState() {
     _mediaAttempts = 0;
     _connectionState = 0xFF;
     _audioState = 0xFF;
-    _callbackCount = 0;
-    _callbackBytes = 0;
-    _lastCallbackMs = 0;
-    _maxGapMs = 0;
-    _stallCount = 0;
     _lastStatsLogMs = 0;
-    _pcmStartedPending = false;
-    _pcmStartedReported = false;
-    _toneCommandMs = 0;
-    _audioBlockLoaded = false;
-    _audioSampleIndex = 0;
-    _audioRepeatPhase = 0;
-    _toneIndex = 0;
 }
 
 void A2DPManager::configureCallbacks() {
@@ -175,14 +183,10 @@ bool A2DPManager::nameSelector(
         return false;
     }
 
-    char text[18]{};
-    snprintf(text, sizeof(text),"%02X:%02X:%02X:%02X:%02X:%02X",
-        address[0], address[1], address[2],
-        address[3], address[4], address[5]);
-
-    self->_remoteAddress = String(text);
-    memcpy(self->_targetAddress, address, sizeof(self->_targetAddress));
+    portENTER_CRITICAL(&self->_callbackMux);
+    memcpy(self->_pendingDiscoveredAddress, address, sizeof(self->_pendingDiscoveredAddress));
     self->_classicFoundPending = true;
+    portEXIT_CRITICAL(&self->_callbackMux);
     return true;
 }
 
@@ -193,6 +197,8 @@ int32_t A2DPManager::frameCallback(Frame* frames, int32_t count) {
     }
 
     const uint32_t now = millis();
+
+    portENTER_CRITICAL(&self->_callbackMux);
     const uint32_t previous = self->_lastCallbackMs;
 
     if (previous != 0) {
@@ -201,18 +207,23 @@ int32_t A2DPManager::frameCallback(Frame* frames, int32_t count) {
             self->_maxGapMs = gap;
         }
         if (gap >= 100) {
-            __atomic_fetch_add(&self->_stallCount, 1U, __ATOMIC_RELAXED);
+            ++self->_stallCount;
         }
     }
 
     self->_lastCallbackMs = now;
-    __atomic_fetch_add(&self->_callbackCount, 1U, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&self->_callbackBytes, static_cast<uint32_t>(count) * sizeof(Frame), __ATOMIC_RELAXED);
+    ++self->_callbackCount;
+    self->_callbackBytes += static_cast<uint32_t>(count) * sizeof(Frame);
+    portEXIT_CRITICAL(&self->_callbackMux);
 
     const bool filled = self->fillFrames(frames, count);
-    if (filled && !self->_pcmStartedReported) {
-        self->_pcmStartedReported = true;
-        self->_pcmStartedPending = true;
+    if (filled) {
+        portENTER_CRITICAL(&self->_callbackMux);
+        if (!self->_pcmStartedReported) {
+            self->_pcmStartedReported = true;
+            self->_pcmStartedPending = true;
+        }
+        portEXIT_CRITICAL(&self->_callbackMux);
     }
 
     return count;
@@ -223,8 +234,15 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
         return false;
     }
 
-    if (_tone) {
-        if (!_toneReady) {
+    bool tone = false;
+    bool toneReady = false;
+    portENTER_CRITICAL(&_callbackMux);
+    tone = _tone;
+    toneReady = _toneReady;
+    portEXIT_CRITICAL(&_callbackMux);
+
+    if (tone) {
+        if (!toneReady) {
             memset(frames, 0, static_cast<size_t>(count) * sizeof(Frame));
             return true;
         }
@@ -257,12 +275,12 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
         return true;
     }
 
+    const AudioProfile profile = _audio.profile();
+    const uint8_t repeatCount = profile.sampleRate
+        ? static_cast<uint8_t>(config::A2DP_TONE_SAMPLE_RATE / profile.sampleRate)
+        : 1;
+
     int32_t output = 0;
-    const uint8_t repeatCount =
-    _audio.profile().sampleRate
-    ? static_cast<uint8_t>(config::A2DP_TONE_SAMPLE_RATE /
-        _audio.profile().sampleRate)
-    : 1;
 
     while (output < count) {
         if (!_audioBlockLoaded) {
@@ -286,14 +304,14 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
             const uint32_t offset =
             config::AUDIO_HEADER_BYTES +
             static_cast<uint32_t>(_audioSampleIndex) *
-            _audio.profile().channels * 2U;
+            profile.channels * 2U;
 
             _audioLeft = static_cast<int16_t>(
                 static_cast<uint16_t>(_audioBlock[offset]) |
                 (static_cast<uint16_t>(_audioBlock[offset + 1]) << 8));
 
             _audioRight =
-            _audio.profile().channels == 2
+            profile.channels == 2
             ? static_cast<int16_t>(
                 static_cast<uint16_t>(_audioBlock[offset + 2]) |
                 (static_cast<uint16_t>(_audioBlock[offset + 3]) << 8))
@@ -304,7 +322,7 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
         frames[output].channel2 = _audioRight;
         ++output;
 
-        if (_audio.profile().sampleRate == 44100) {
+        if (profile.sampleRate == 44100) {
             _audioRepeatPhase = 0;
             ++_audioSampleIndex;
         }
@@ -348,42 +366,86 @@ void A2DPManager::audioCallback(
 }
 
 void A2DPManager::handleConnection(esp_a2d_connection_state_t state) {
-    _connectionState = static_cast<uint8_t>(state);
-
-    if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
-        _state = ConnectionState::Connected;
-        _disconnectCandidate = false;
-        _disconnectHadAudio = false;
-        _connectionEventPending = true;
-        _mediaCheckPending = true;
-        _mediaCheckDue = millis() + config::A2DP_MEDIA_CHECK_DELAY_MS;
-        _mediaAttempts = 0;
-        _connectStart = 0;
-        return;
-    }
-
-    if (state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
-        _disconnectCandidate = true;
-        _disconnectSince = millis();
-        _disconnectHadAudio = (_state == ConnectionState::Streaming);
-    }
+    portENTER_CRITICAL(&_callbackMux);
+    _pendingConnectionState = static_cast<uint8_t>(state);
+    portEXIT_CRITICAL(&_callbackMux);
 }
 
 void A2DPManager::handleAudio(esp_a2d_audio_state_t state) {
-    _audioState = static_cast<uint8_t>(state);
+    portENTER_CRITICAL(&_callbackMux);
+    _pendingAudioState = static_cast<uint8_t>(state);
+    portEXIT_CRITICAL(&_callbackMux);
+}
 
-    if (state == ESP_A2D_AUDIO_STATE_STARTED) {
-        _state = ConnectionState::Streaming;
-        _disconnectHadAudio = true;
-        _disconnectCandidate = false;
-        _mediaCheckPending = false;
-        _audioStartedPending = true;
+void A2DPManager::applyPendingCallbacks() {
+    uint8_t connectionState = 0xFF;
+    uint8_t audioState = 0xFF;
+    bool classicFound = false;
+    uint8_t discoveredAddress[6]{};
+
+    portENTER_CRITICAL(&_callbackMux);
+    connectionState = _pendingConnectionState;
+    audioState = _pendingAudioState;
+    _pendingConnectionState = 0xFF;
+    _pendingAudioState = 0xFF;
+    classicFound = _classicFoundPending;
+    _classicFoundPending = false;
+    memcpy(discoveredAddress, _pendingDiscoveredAddress, sizeof(discoveredAddress));
+    portEXIT_CRITICAL(&_callbackMux);
+
+    if (classicFound) {
+        char text[18]{};
+        snprintf(text, sizeof(text), "%02X:%02X:%02X:%02X:%02X:%02X",
+            discoveredAddress[0], discoveredAddress[1], discoveredAddress[2],
+            discoveredAddress[3], discoveredAddress[4], discoveredAddress[5]);
+        _remoteAddress = String(text);
+        memcpy(_targetAddress, discoveredAddress, sizeof(_targetAddress));
+        _classicFoundPending = true;
     }
-    else if (state == ESP_A2D_AUDIO_STATE_STOPPED) {
-        if (_state == ConnectionState::Streaming) {
-            _state = ConnectionState::Connected;
+
+    // Media state is processed before connection teardown so a simultaneous
+    // AUDIO_STARTED/DISCONNECTED callback pair cannot erase evidence that the
+    // link actually entered the streaming state.
+    if (audioState != 0xFF) {
+        _audioState = audioState;
+
+        if (audioState == ESP_A2D_AUDIO_STATE_STARTED) {
+            _state = ConnectionState::Streaming;
+            _disconnectHadAudio = true;
+            _disconnectCandidate = false;
+            _mediaCheckPending = false;
+            _audioStartedPending = true;
         }
-        _audioStoppedPending = true;
+        else if (audioState == ESP_A2D_AUDIO_STATE_STOPPED) {
+            if (connectionState != ESP_A2D_CONNECTION_STATE_DISCONNECTED &&
+                _state == ConnectionState::Streaming) {
+                _state = ConnectionState::Connected;
+            }
+            _audioStoppedPending = true;
+        }
+    }
+
+    if (connectionState != 0xFF) {
+        _connectionState = connectionState;
+
+        if (connectionState == ESP_A2D_CONNECTION_STATE_CONNECTED) {
+            _state = ConnectionState::Connected;
+            _disconnectCandidate = false;
+            _disconnectHadAudio = false;
+            _connectionEventPending = true;
+            _mediaCheckPending = true;
+            _mediaCheckDue = millis() + config::A2DP_MEDIA_CHECK_DELAY_MS;
+            _mediaAttempts = 0;
+            _connectStart = 0;
+        }
+        else if (connectionState == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
+            _disconnectCandidate = true;
+            _disconnectSince = millis();
+            if (_state == ConnectionState::Streaming ||
+                audioState == ESP_A2DP_AUDIO_STATE_STARTED) {
+                _disconnectHadAudio = true;
+            }
+        }
     }
 }
 
@@ -571,15 +633,20 @@ Result<void> A2DPManager::startTone() {
     }
 
     prepareTone();
+    portENTER_CRITICAL(&_callbackMux);
     _tone = true;
     _pcmStartedReported = false;
+    _pcmStartedPending = false;
     _toneCommandMs = millis();
+    portEXIT_CRITICAL(&_callbackMux);
     _logger.info("A2DP test tone enabled");
     return Result<void>::ok();
 }
 
 Result<void> A2DPManager::stopTone() {
+    portENTER_CRITICAL(&_callbackMux);
     _tone = false;
+    portEXIT_CRITICAL(&_callbackMux);
     _logger.info("A2DP test tone stopped");
     return Result<void>::ok();
 }
@@ -602,7 +669,9 @@ Result<void> A2DPManager::startAudio(const AudioProfile& profile) {
         return Result<void>::fail(ErrorCode::Unsupported);
     }
 
+    portENTER_CRITICAL(&_callbackMux);
     _tone = false;
+    portEXIT_CRITICAL(&_callbackMux);
 
     const uint32_t blockBytes =
     static_cast<uint32_t>(config::AUDIO_HEADER_BYTES) +
@@ -642,7 +711,9 @@ Result<void> A2DPManager::disconnect() {
     }
 
     _state = ConnectionState::Disconnecting;
+    portENTER_CRITICAL(&_callbackMux);
     _tone = false;
+    portEXIT_CRITICAL(&_callbackMux);
     _audio.stop();
     _pendingConnection = PendingConnection::None;
     _pendingAddress = "";
@@ -659,7 +730,9 @@ Result<void> A2DPManager::disconnect() {
 
 Status A2DPManager::status() const {
     Status result;
+    portENTER_CRITICAL(const_cast<portMUX_TYPE*>(&_callbackMux));
     result.tone = _tone;
+    portEXIT_CRITICAL(const_cast<portMUX_TYPE*>(&_callbackMux));
     result.active =
     _state == ConnectionState::Connected ||
     _state == ConnectionState::Streaming;
@@ -674,6 +747,17 @@ Status A2DPManager::status() const {
 AudioStatus A2DPManager::audioStatus() const {
     const auto buffer = _audio.status();
 
+    uint32_t callbackCount = 0;
+    uint32_t callbackBytes = 0;
+    uint32_t maxGapMs = 0;
+    uint32_t stalls = 0;
+    portENTER_CRITICAL(const_cast<portMUX_TYPE*>(&_callbackMux));
+    callbackCount = _callbackCount;
+    callbackBytes = _callbackBytes;
+    maxGapMs = _maxGapMs;
+    stalls = _stallCount;
+    portEXIT_CRITICAL(const_cast<portMUX_TYPE*>(&_callbackMux));
+
     AudioStatus result;
     result.streaming = buffer.streaming;
     result.primed = buffer.primed;
@@ -683,15 +767,16 @@ AudioStatus A2DPManager::audioStatus() const {
     result.received = buffer.received;
     result.dropped = buffer.dropped;
     result.underruns = buffer.underruns;
-    result.callbackCount = _callbackCount;
-    result.callbackBytes = _callbackBytes;
-    result.maxGapMs = _maxGapMs;
-    result.stalls = _stallCount;
+    result.callbackCount = callbackCount;
+    result.callbackBytes = callbackBytes;
+    result.maxGapMs = maxGapMs;
+    result.stalls = stalls;
     return result;
 }
 
 void A2DPManager::update() {
     processPendingConnection();
+    applyPendingCallbacks();
 
     if (_classicFoundPending) {
         _classicFoundPending = false;
@@ -726,12 +811,27 @@ void A2DPManager::update() {
         _events.publish({EventType::A2dpAudioStopped, nullptr, 0});
     }
 
-    if (_pcmStartedPending) {
-        _pcmStartedPending = false;
+    bool pcmStartedPending = false;
+    uint32_t toneCommandMs = 0;
+    uint32_t callbackCount = 0;
+    uint32_t callbackBytes = 0;
+    uint32_t maxGapMs = 0;
+    uint32_t stalls = 0;
+
+    portENTER_CRITICAL(&_callbackMux);
+    pcmStartedPending = _pcmStartedPending;
+    _pcmStartedPending = false;
+    toneCommandMs = _toneCommandMs;
+    callbackCount = _callbackCount;
+    callbackBytes = _callbackBytes;
+    maxGapMs = _maxGapMs;
+    stalls = _stallCount;
+    portEXIT_CRITICAL(&_callbackMux);
+
+    if (pcmStartedPending) {
         _logger.info(
             "A2DP PCM callback active; streaming started after %lu ms",
-            static_cast<unsigned long>(
-            _toneCommandMs ? millis() - _toneCommandMs : 0));
+            static_cast<unsigned long>(toneCommandMs ? millis() - toneCommandMs : 0));
     }
 
     if (_audio.takeUnderrunFlag()) {
@@ -750,7 +850,9 @@ void A2DPManager::update() {
 
         if (!_disconnectHadAudio && _state != ConnectionState::Streaming) {
             _state = ConnectionState::Disconnected;
+            portENTER_CRITICAL(&_callbackMux);
             _tone = false;
+            portEXIT_CRITICAL(&_callbackMux);
             _audio.stop();
             _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
             _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
@@ -787,15 +889,20 @@ void A2DPManager::update() {
         }
     }
 
-    if (_tone &&
+    bool toneEnabled = false;
+    portENTER_CRITICAL(&_callbackMux);
+    toneEnabled = _tone;
+    portEXIT_CRITICAL(&_callbackMux);
+
+    if (toneEnabled &&
         static_cast<uint32_t>(millis() - _lastStatsLogMs) >= 2000) {
         _lastStatsLogMs = millis();
         _logger.debug(
             "A2DP tone callback stats: callbacks=%lu bytes=%lu max_gap=%lums stalls=%lu",
-            static_cast<unsigned long>(_callbackCount),
-            static_cast<unsigned long>(_callbackBytes),
-            static_cast<unsigned long>(_maxGapMs),
-            static_cast<unsigned long>(_stallCount));
+            static_cast<unsigned long>(callbackCount),
+            static_cast<unsigned long>(callbackBytes),
+            static_cast<unsigned long>(maxGapMs),
+            static_cast<unsigned long>(stalls));
     }
 
     if (_state == ConnectionState::Connecting &&
@@ -813,7 +920,9 @@ void A2DPManager::update() {
         _connectionState = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
         _audioState = ESP_A2D_AUDIO_STATE_STOPPED;
         _audio.stop();
+        portENTER_CRITICAL(&_callbackMux);
         _tone = false;
+        portEXIT_CRITICAL(&_callbackMux);
         _events.publish({EventType::A2dpConnectFailed, nullptr, 0});
 
         if (_autoMode && !_fallbackAttempted && _fallbackName.length()) {
