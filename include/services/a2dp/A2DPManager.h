@@ -100,7 +100,7 @@ private:
     uint8_t _pendingConnectionState{0xFF};
     uint8_t _pendingAudioState{0xFF};
     uint8_t _pendingDiscoveredAddress[6]{};
-    portMUX_TYPE _callbackMux = portMUX_INITIALIZER_UNLOCKED;
+    mutable portMUX_TYPE _callbackMux = portMUX_INITIALIZER_UNLOCKED;
 
     enum class PendingConnection : uint8_t {
         None,
