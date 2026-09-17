@@ -8,7 +8,9 @@ constexpr char A2DP_DEFAULT_TARGET_NAME[] ="QCY T13 ANC2";
 constexpr uint16_t MAX_PROTOCOL_PAYLOAD = 4096;
 constexpr uint16_t MAX_NETWORK_DATA = 2048;
 constexpr uint32_t NETWORK_DEFAULT_TIMEOUT_MS = 5000;
-constexpr uint32_t A2DP_CONNECT_TIMEOUT_MS = 60000;
+// Keep enough time for Classic reconnect retries plus the library's fallback
+// inquiry, while leaving the Host a safety margin before its 65 s wait expires.
+constexpr uint32_t A2DP_CONNECT_TIMEOUT_MS = 50000;
 constexpr uint32_t A2DP_MEDIA_CHECK_DELAY_MS = 300;
 constexpr uint8_t A2DP_MEDIA_CHECK_RETRIES = 2;
 constexpr uint32_t A2DP_DISCONNECT_DEBOUNCE_MS = 1000;
