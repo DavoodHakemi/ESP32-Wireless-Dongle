@@ -24,3 +24,9 @@ def test_a2dp_host_wait_exceeds_firmware_timeout():
     wait_match = re.search(r"_wait_a2dp_result\(device, wait_seconds: float = ([0-9.]+)\)", main)
     assert timeout_match and wait_match
     assert float(wait_match.group(1)) * 1000.0 > int(timeout_match.group(1))
+
+
+def test_a2dp_auto_uses_fast_library_fallback_budget():
+    manager = (ROOT / "src/services/a2dp/A2DPManager.cpp").read_text(encoding="utf-8")
+    assert "_pendingRetries = 1;" in manager
+    assert "Three retries would push the library's discovery fallback beyond" in manager
