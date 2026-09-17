@@ -3,6 +3,13 @@ import time
 
 import serial
 
+try:
+    from console import install_console_contract
+except ImportError:
+    from host.console import install_console_contract
+
+install_console_contract()
+
 
 class SerialTransport:
     """Low-level serial transport."""
