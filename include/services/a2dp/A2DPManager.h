@@ -73,11 +73,11 @@ private:
     uint8_t _audioRepeatPhase{0};
     int16_t _audioLeft{0};
     int16_t _audioRight{0};
-    volatile uint32_t _callbackCount{0};
-    volatile uint32_t _callbackBytes{0};
-    volatile uint32_t _lastCallbackMs{0};
-    volatile uint32_t _maxGapMs{0};
-    volatile uint32_t _stallCount{0};
+    uint32_t _callbackCount{0};
+    uint32_t _callbackBytes{0};
+    uint32_t _lastCallbackMs{0};
+    uint32_t _maxGapMs{0};
+    uint32_t _stallCount{0};
     uint32_t _lastStatsLogMs{0};
 
     static A2DPManager* _callbackInstance;
