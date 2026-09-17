@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).parents[1]
 
@@ -15,6 +16,11 @@ def test_host_console_contract_is_installed_at_transport_boundary():
     assert "install_console_contract()" in transport
 
 
-def test_a2dp_connect_timeout_leaves_host_wait_margin():
+def test_a2dp_host_wait_exceeds_firmware_timeout():
     config = (ROOT / "include/config/AppConfig.h").read_text(encoding="utf-8")
-    assert "A2DP_CONNECT_TIMEOUT_MS = 50000" in config
+    main = (ROOT / "host/main.py").read_text(encoding="utf-8")
+
+    timeout_match = re.search(r"A2DP_CONNECT_TIMEOUT_MS\s*=\s*(\d+)", config)
+    wait_match = re.search(r"_wait_a2dp_result\(device, wait_seconds: float = ([0-9.]+)\)", main)
+    assert timeout_match and wait_match
+    assert float(wait_match.group(1)) * 1000.0 > int(timeout_match.group(1))
