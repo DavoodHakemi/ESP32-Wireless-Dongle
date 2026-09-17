@@ -1,5 +1,6 @@
 #include "services/a2dp/A2DPSource.h"
 
+#include <Arduino.h>
 #include <esp_a2dp_api.h>
 #include <cstring>
 
