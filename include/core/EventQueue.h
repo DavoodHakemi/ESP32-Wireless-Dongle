@@ -16,11 +16,16 @@ public:
     // event (32 entries => 65 events). BLE emits one event per entry plus
     // completion, and Wi-Fi scans can produce larger bursts. The queue must
     // absorb a complete service update burst before DongleApplication drains it.
-    static constexpr uint8_t CAPACITY = 128;
+    static constexpr uint8_t CAPACITY = 65;
     static constexpr uint8_t MIN_SCAN_BURST_CAPACITY = 65;
     static_assert(CAPACITY >= MIN_SCAN_BURST_CAPACITY,
         "EventQueue capacity must absorb a complete Classic Bluetooth scan burst");
-    static constexpr uint16_t MAX_PAYLOAD = 336;
+
+    // Largest current event payload is the BLE device event:
+    // 1+17 address + 1+64 name + 1 RSSI + 2 detail length + 240 details + 1 flag = 327.
+    // Keep one byte of headroom for protocol evolution without retaining the
+    // previous 336-byte payload allocation in every queue record.
+    static constexpr uint16_t MAX_PAYLOAD = 328;
 
     struct EventRecord {
         EventType type{};
