@@ -76,9 +76,10 @@ def test_a2dp_name_selector_does_not_mutate_runtime_target_from_callback():
 
 def test_event_queue_absorbs_classic_scan_burst():
     queue = text("include/core/EventQueue.h")
-    assert "static constexpr uint8_t CAPACITY = 128;" in queue
+    assert "static constexpr uint8_t CAPACITY = 65;" in queue
     assert "MIN_SCAN_BURST_CAPACITY = 65" in queue
     assert "static_assert(CAPACITY >= MIN_SCAN_BURST_CAPACITY" in queue
+    assert "static constexpr uint16_t MAX_PAYLOAD = 328;" in queue
 
 
 def test_audio_buffer_state_and_profile_are_guarded():
@@ -89,6 +90,20 @@ def test_audio_buffer_state_and_profile_are_guarded():
     assert "bool AudioStreamBuffer::streaming() const" in source
     assert "bool AudioStreamBuffer::primed() const" in source
     assert source.count("portENTER_CRITICAL(&_mux)") >= 10
+
+
+def test_audio_ring_capacity_keeps_prebuffer_margin():
+    config = text("include/config/AppConfig.h")
+    assert "constexpr uint32_t AUDIO_RING_CAPACITY = 28672;" in config
+    assert "constexpr uint32_t AUDIO_PREBUFFER_MULTIPLIER = 4;" in config
+
+
+def test_a2dp_stats_are_mutex_protected_without_volatile():
+    header = text("include/services/a2dp/A2DPManager.h")
+    assert "volatile uint32_t _callbackCount" not in header
+    assert "volatile uint32_t _callbackBytes" not in header
+    assert "volatile uint32_t _stallCount" not in header
+    assert "mutable portMUX_TYPE _callbackMux" in header
 
 
 def test_dependency_pin():
