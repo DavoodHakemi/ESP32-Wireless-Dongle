@@ -57,11 +57,21 @@ The first modular package exposed four integration defects when compiled against
 This package deliberately remains pinned to ESP32-A2DP v1.8.10 because that is the compatibility point established by the actual Arduino-ESP32 3.0.7 environment.
 
 
+## 2.3.11 Bluetooth core audit
+
+This change is a TYPE A bug fix with CROSS-LAYER scope. The audit was constrained to the existing Bluetooth Classic, BLE and A2DP modules. The Arduino 2.2.7 firmware remains the behavioral baseline.
+
+- Classic scan event delivery is preserved before the BluetoothSerial stack restore.
+- BLE scan execution now uses the framework-owned asynchronous scan API, removing the extra application-created scan task and its stack allocation.
+- A2DP direct-MAC selection again matches the requested Classic address before any name fallback.
+- Library auto-reconnect is disabled for the direct-MAC path; cached-MAC -> cached/default-name fallback remains owned by A2DPManager.
+- No protocol identifiers or payload contracts are changed.
+
 ## 2.3.10 Reliability follow-up
 
 The modular implementation is now explicitly aligned with the asynchronous behavior of the Arduino 2.2.7 baseline at subsystem boundaries:
 
 - Wi-Fi scan result publication is bounded per application update so the fixed EventQueue cannot overflow before `WIFI_SCAN_DONE` is emitted.
 - Cold-start Bluetooth Classic/BLE initialization is deferred from the command dispatch path into the service update phase, preserving the immediate response contract.
-- Application event delivery is drained between service updates, restoring the legacy Wi-Fi → Network → Bluetooth → A2DP processing order more closely.
+- Application event delivery is drained after each service phase, restoring the legacy Wi-Fi → Network → Bluetooth → A2DP processing order more closely.
 - A2DP Classic-device discovery callback state and application notification state are separate flags.
