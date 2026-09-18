@@ -1,6 +1,6 @@
 # Protocol
 
-Wire protocol version: **1**. Firmware semantic version: **2.3.10**. These versions are intentionally independent.
+Wire protocol version: **1**. Firmware semantic version: **2.3.11**. These versions are intentionally independent.
 
 Frame:
 
