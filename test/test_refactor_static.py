@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 ROOT = Path(__file__).parents[1]
 
 
@@ -76,8 +77,8 @@ def test_a2dp_name_selector_does_not_mutate_runtime_target_from_callback():
 
 def test_event_queue_absorbs_classic_scan_burst():
     queue = text("include/core/EventQueue.h")
-    assert "static constexpr uint8_t CAPACITY = 65;" in queue
-    assert "MIN_SCAN_BURST_CAPACITY = 65" in queue
+    assert "static constexpr uint8_t CAPACITY = 16;" in queue
+    assert "MIN_SCAN_BURST_CAPACITY = 9" in queue
     assert "static_assert(CAPACITY >= MIN_SCAN_BURST_CAPACITY" in queue
     assert "static constexpr uint16_t MAX_PAYLOAD = 328;" in queue
 
@@ -122,11 +123,13 @@ def test_a2dp_shutdown_is_nonblocking_during_discovery():
     assert "_source.stop();" not in manager_cpp
 
 
-def test_auto_reconnect_uses_direct_library_fallback():
+def test_a2dp_mac_path_restores_arduino_selector_semantics():
     source = text("src/services/a2dp/A2DPManager.cpp")
     adapter = text("src/services/a2dp/A2DPSource.cpp")
-    assert "_pendingRetries = 0;" in source
-    assert "_source.set_auto_reconnect(address, retries >= 0 ? retries : 3);" in adapter
+    assert 'if (self->_remoteAddress.length() == 17)' in source
+    assert 'memcmp(address, self->_targetAddress, sizeof(self->_targetAddress))' in source
+    assert '_source.set_auto_reconnect(false);' in adapter
+    assert '(void)retries;' in adapter
 
 
 def test_dependency_pin():
@@ -159,8 +162,6 @@ def test_legacy_audio_status_payload_is_preserved():
     assert 'uint8_t p[36]{}' in source
 
 
-
-
 def test_wifi_scan_results_are_streamed_in_bounded_batches():
     header = text("include/services/wifi/WiFiManager.h")
     source = text("src/services/wifi/WiFiManager.cpp")
@@ -170,19 +171,52 @@ def test_wifi_scan_results_are_streamed_in_bounded_batches():
     assert "if (_scanIndex < count)" in source
 
 
-def test_bluetooth_cold_start_scan_is_deferred_out_of_command_path():
-    classic = text("include/services/bluetooth/BluetoothClassic.h") + text("src/services/bluetooth/BluetoothClassic.cpp")
-    ble = text("include/services/bluetooth/BluetoothLE.h") + text("src/services/bluetooth/BluetoothLE.cpp")
-    assert "_scanStartPending" in classic
+def test_bluetooth_scan_lifecycle_matches_arduino_baseline():
+    classic_h = text("include/services/bluetooth/BluetoothClassic.h")
+    classic = text("src/services/bluetooth/BluetoothClassic.cpp")
+    ble = text("src/services/bluetooth/BluetoothLE.cpp")
+    hw = text("include/config/HardwareConfig.h")
+    assert "_scanStartPending" in classic_h
     assert "startScanNow()" in classic
-    assert "_scanStartPending" in ble
+    assert "BluetoothSerial" in classic_h
+    assert "esp_bt_gap_start_discovery(" in classic
+    assert "esp_bt_gap_cancel_discovery();" in classic
+    assert "_serial.getScanResults()" in classic
+    assert "xTaskCreatePinnedToCore" not in classic
+    assert "heap_caps_get_largest_free_block" in classic
+    assert "void BluetoothClassic::postUpdate()" in classic
     assert "BLEDevice::init" in ble
+    assert "scanCompleteCallback" in ble
+    assert "xTaskCreatePinnedToCore" not in ble
 
 
-def test_application_drains_events_between_service_updates():
+def test_application_drains_events_before_bluetooth_stack_restore():
     source = text("src/application/DongleApplication.cpp")
     assert source.count("drainEvents();") >= 4
+    assert "_bluetooth.update();" in source
+    assert "drainEvents();\n    _bluetooth.postUpdate();" in source
     assert "void DongleApplication::drainEvents()" in source
+
+
+def test_bluetooth_classic_keeps_stack_owned_by_bluetoothserial_after_scan():
+    header = text("include/services/bluetooth/BluetoothClassic.h")
+    source = text("src/services/bluetooth/BluetoothClassic.cpp")
+    manager = text("include/services/bluetooth/BluetoothManager.h")
+    application = text("src/application/DongleApplication.cpp")
+    assert "void postUpdate();" in header
+    assert "esp_bt_gap_cancel_discovery();" in source
+    assert "void BluetoothClassic::postUpdate()" in source
+    assert "_serial.end();" not in source[source.index("void BluetoothClassic::completeScan"):source.index("Result<void> BluetoothClassic::connect")]
+    assert "classic.postUpdate();" in manager
+    assert "_bluetooth.postUpdate();" in application
+
+
+def test_ble_scan_worker_preserves_arduino_core_affinity_after_cold_start_deferral():
+    hardware = text("include/config/HardwareConfig.h")
+    ble = text("src/services/bluetooth/BluetoothLE.cpp")
+    assert "constexpr uint8_t A2DP_TASK_CORE = 1;" in hardware
+    assert "_scanStartPending" in ble
+    assert "BLEDevice::init" in ble
 
 
 def test_auto_reconnect_keeps_fallback_state():
