@@ -3,11 +3,14 @@
 #include "config/AppConfig.h"
 #include "config/HardwareConfig.h"
 #include <esp_gap_bt_api.h>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
+#include <esp_heap_caps.h>
 #include <cstdio>
 #include <cstring>
 
 namespace dongle::services::bluetooth {
-BluetoothClassic* BluetoothClassic::_callbackInstance = nullptr;
+std::atomic<BluetoothClassic*> BluetoothClassic::_callbackInstance{nullptr};
 BluetoothClassic::BluetoothClassic(ILogger& logger, IEventSink& events) : _logger(logger), _events(events) {}
 void BluetoothClassic::formatAddress(const uint8_t a[6], char out[18]) {
     snprintf(out, 18,"%02X:%02X:%02X:%02X:%02X:%02X", a[0], a[1], a[2], a[3], a[4], a[5]);
@@ -24,8 +27,25 @@ bool BluetoothClassic::parseMac(const String& text, uint8_t out[6]) {
 }
 Result<void> BluetoothClassic::begin() {
     if (_initialized) return Result<void>::ok();
-    if (!_serial.begin(config::DEVICE_NAME, true)) return Result<void>::fail(ErrorCode::HardwareError);
+
+    const bool started = _serial.begin(config::DEVICE_NAME, true);
+    if (!started) {
+        _logger.error(
+            "Bluetooth Classic init failed heap=%lu ctrl=%d blue=%d",
+            static_cast<unsigned long>(
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+            static_cast<int>(esp_bt_controller_get_status()),
+            static_cast<int>(esp_bluedroid_get_status()));
+        return Result<void>::fail(ErrorCode::HardwareError);
+    }
+
     _initialized=true;
+    _logger.info(
+        "Bluetooth Classic ready heap=%lu ctrl=%d blue=%d",
+        static_cast<unsigned long>(
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+        static_cast<int>(esp_bt_controller_get_status()),
+        static_cast<int>(esp_bluedroid_get_status()));
     return Result<void>::ok();
 }
 bool BluetoothClassic::copyNameFromEir(uint8_t* eir, char* out, size_t outSize) {
@@ -56,7 +76,8 @@ int BluetoothClassic::allocateEntry(const esp_bd_addr_t address) {
     return -1;
 }
 void BluetoothClassic::gapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t*param) {
-    if (_callbackInstance)_callbackInstance->handleGapEvent(event, param);
+    auto* instance = _callbackInstance.load(std::memory_order_acquire);
+    if (instance) instance->handleGapEvent(event, param);
 }
 void BluetoothClassic::handleGapEvent(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t*param) {
     if (!param)return;
@@ -113,13 +134,17 @@ Result<void> BluetoothClassic::scan(uint16_t seconds) {
 }
 
 Result<void> BluetoothClassic::startScanNow() {
-    _callbackInstance=this;
+    _callbackInstance.store(this, std::memory_order_release);
     memset(_entries, 0, sizeof(_entries));
     _count=0;
     _scanCompletionPending=false;
 
     if (esp_bt_gap_register_callback(gapCallback)!=ESP_OK) {
-        _callbackInstance=nullptr;
+        _callbackInstance.store(nullptr, std::memory_order_release);
+        _logger.error(
+            "Bluetooth Classic GAP callback registration failed heap=%lu",
+            static_cast<unsigned long>(
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
         return Result<void>::fail(ErrorCode::HardwareError);
     }
 
@@ -128,7 +153,11 @@ Result<void> BluetoothClassic::startScanNow() {
 
     if (esp_bt_gap_start_discovery(
             ESP_BT_INQ_MODE_GENERAL_INQUIRY, inq, 0)!=ESP_OK) {
-        _callbackInstance=nullptr;
+        _callbackInstance.store(nullptr, std::memory_order_release);
+        _logger.error(
+            "Bluetooth Classic GAP discovery start failed heap=%lu",
+            static_cast<unsigned long>(
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
         return Result<void>::fail(ErrorCode::ScanFailed);
     }
 
@@ -144,62 +173,98 @@ Result<void> BluetoothClassic::stopScan() {
     esp_bt_gap_cancel_discovery();
     return Result<void>::ok();
 }
-void BluetoothClassic::finishScan() {
-    for (uint8_t i=0;i<MAX_ENTRIES;++i) {
-        const auto&entry=_entries[i];
-        if (!entry.used)continue;
+void BluetoothClassic::startScanPublication() {
+    _scanPublishIndex = 0;
+    _scanPublishing = true;
+    _restoreAfterScanPending = false;
+    _callbackInstance.store(nullptr, std::memory_order_release);
+}
+
+void BluetoothClassic::publishScanBatch() {
+    if (!_scanPublishing) return;
+
+    uint8_t published = 0;
+    while (published < PUBLISH_ENTRIES_PER_UPDATE &&
+           _scanPublishIndex < MAX_ENTRIES) {
+        const auto& entry = _entries[_scanPublishIndex++];
+        if (!entry.used) continue;
+
         char addr[18];
         formatAddress(entry.address, addr);
-        String name=entry.name[0]?String(entry.name):String("(unknown)");
-        if (name.length()>64)name=name.substring(0, 64);
-        uint8_t p[1+17+1+64+2]{};
-        uint16_t o=0;
-        p[o++]=17;
-        memcpy(p+o, addr, 17);
-        o+=17;
-        p[o++]=static_cast<uint8_t>(name.length());
-        memcpy(p+o, name.c_str(), name.length());
-        o+=name.length();
-        const int16_t rssi=entry.hasRssi?entry.rssi:-127;
-        p[o++]=static_cast<uint8_t>(rssi&0xFF);
-        p[o++]=static_cast<uint8_t>(rssi>>8);
+        String name = entry.name[0] ? String(entry.name) : String("(unknown)");
+        if (name.length() > 64) name = name.substring(0, 64);
+
+        uint8_t p[1 + 17 + 1 + 64 + 2]{};
+        uint16_t o = 0;
+        p[o++] = 17;
+        memcpy(p + o, addr, 17);
+        o += 17;
+        p[o++] = static_cast<uint8_t>(name.length());
+        memcpy(p + o, name.c_str(), name.length());
+        o += name.length();
+        const int16_t rssi = entry.hasRssi ? entry.rssi : -127;
+        p[o++] = static_cast<uint8_t>(rssi & 0xFF);
+        p[o++] = static_cast<uint8_t>(rssi >> 8);
         _events.publish({EventType::BluetoothDeviceFound, p, o});
-        uint8_t d[1+17+1+64+1+1+4+1+1+2+1]{};
-        o=0;
-        d[o++]=17;
-        memcpy(d+o, addr, 17);
-        o+=17;
-        d[o++]=static_cast<uint8_t>(name.length());
-        memcpy(d+o, name.c_str(), name.length());
-        o+=name.length();
-        d[o++]=static_cast<uint8_t>(rssi);
-        d[o++]=entry.hasCod?1:0;
-        uint32_t cod=entry.hasCod?entry.cod:0;
-        memcpy(d+o, &cod, 4);
-        o+=4;
-        const uint8_t major=entry.hasCod?static_cast<uint8_t>(esp_bt_gap_get_cod_major_dev(cod)):0xFF;
-        const uint8_t minor=entry.hasCod?static_cast<uint8_t>(esp_bt_gap_get_cod_minor_dev(cod)):0xFF;
-        const uint16_t service=entry.hasCod?static_cast<uint16_t>(esp_bt_gap_get_cod_srvc(cod)):0;
-        const uint8_t audio=(entry.hasCod&&(esp_bt_gap_get_cod_major_dev(cod)==ESP_BT_COD_MAJOR_DEV_AV||(service&ESP_BT_COD_SRVC_AUDIO)!=0))?1:0;
-        d[o++]=major;
-        d[o++]=minor;
-        memcpy(d+o, &service, 2);
-        o+=2;
-        d[o++]=audio;
+
+        uint8_t d[1 + 17 + 1 + 64 + 1 + 1 + 4 + 1 + 1 + 2 + 1]{};
+        o = 0;
+        d[o++] = 17;
+        memcpy(d + o, addr, 17);
+        o += 17;
+        d[o++] = static_cast<uint8_t>(name.length());
+        memcpy(d + o, name.c_str(), name.length());
+        o += name.length();
+        d[o++] = static_cast<uint8_t>(rssi);
+        d[o++] = entry.hasCod ? 1 : 0;
+        uint32_t cod = entry.hasCod ? entry.cod : 0;
+        memcpy(d + o, &cod, 4);
+        o += 4;
+        const uint8_t major = entry.hasCod
+            ? static_cast<uint8_t>(esp_bt_gap_get_cod_major_dev(cod))
+            : 0xFF;
+        const uint8_t minor = entry.hasCod
+            ? static_cast<uint8_t>(esp_bt_gap_get_cod_minor_dev(cod))
+            : 0xFF;
+        const uint16_t service = entry.hasCod
+            ? static_cast<uint16_t>(esp_bt_gap_get_cod_srvc(cod))
+            : 0;
+        const uint8_t audio = (entry.hasCod &&
+            (esp_bt_gap_get_cod_major_dev(cod) == ESP_BT_COD_MAJOR_DEV_AV ||
+             (service & ESP_BT_COD_SRVC_AUDIO) != 0)) ? 1 : 0;
+        d[o++] = major;
+        d[o++] = minor;
+        memcpy(d + o, &service, 2);
+        o += 2;
+        d[o++] = audio;
         _events.publish({EventType::BluetoothDeviceDetail, d, o});
+        ++published;
     }
-    uint8_t c[2]={
-        static_cast<uint8_t>(_count&0xFF), static_cast<uint8_t>(_count>>8)
-    };
-    _events.publish({EventType::BluetoothScanDone, c, 2});
-    _callbackInstance=nullptr;
-    if (_initialized) {
-        _serial.end();
-        _initialized=false;
-        begin();
+
+    if (_scanPublishIndex >= MAX_ENTRIES) {
+        uint8_t c[2] = {
+            static_cast<uint8_t>(_count & 0xFF),
+            static_cast<uint8_t>(_count >> 8)
+        };
+        _events.publish({EventType::BluetoothScanDone, c, 2});
+        _scanPublishing = false;
+        _restoreAfterScanPending = _initialized;
     }
 }
+
 void BluetoothClassic::update() {
+    if (_restoreAfterScanPending && !_scanPublishing) {
+        _restoreAfterScanPending = false;
+        if (_initialized) {
+            _serial.end();
+            _initialized = false;
+            const auto restored = begin();
+            if (!restored.success) {
+                _logger.error("Bluetooth Classic stack restore failed after scan");
+            }
+        }
+    }
+
     if (_scanStartPending) {
         _scanStartPending=false;
 
@@ -224,8 +289,14 @@ void BluetoothClassic::update() {
     }
 
     if (_scanCompletionPending.exchange(false, std::memory_order_acquire)) {
-        finishScan();
-        _count=0;
+        startScanPublication();
+    }
+
+    if (_scanPublishing) {
+        publishScanBatch();
+        if (!_scanPublishing) {
+            _count=0;
+        }
     }
 }
 Result<void> BluetoothClassic::connect(const String& address) {
@@ -283,7 +354,7 @@ void BluetoothClassic::suspendForA2dp() {
         _serial.end();
         _initialized=false;
     }
-    _callbackInstance=nullptr;
+    _callbackInstance.store(nullptr, std::memory_order_release);
 }
 void BluetoothClassic::restoreAfterA2dp() {
     if (!_initialized)begin();
