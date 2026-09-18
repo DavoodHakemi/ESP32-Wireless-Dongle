@@ -67,6 +67,9 @@ private:
     std::atomic_bool _scanning{false};
     bool _connecting{false};
     std::atomic_bool _scanCompletionPending{false};
+    bool _scanPublishing{false};
+    bool _restoreAfterScanPending{false};
+    uint8_t _scanPublishIndex{0};
     bool _scanStartPending{
         false
     };
