@@ -5,22 +5,44 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <cstring>
+#include <esp_bt.h>
+#include <esp_bt_main.h>
+#include <esp_heap_caps.h>
 
 namespace dongle::services::bluetooth {
-BluetoothLE* BluetoothLE::_instance=nullptr;
+std::atomic<BluetoothLE*> BluetoothLE::_instance{nullptr};
 void BluetoothLE::clearEntries() {
     for (auto& e:_entries)e=BleScanEntry{};
     _count=0;
 }
 Result<void> BluetoothLE::begin() {
     if (_initialized)return Result<void>::ok();
+
+    // Arduino-ESP32 3.0.7 BLEDevice::init() returns void. Validate the
+    // resulting stack state with the public initialization/status APIs.
     BLEDevice::init("");
+    if (!BLEDevice::getInitialized()) {
+        _logger.error(
+            "Bluetooth LE init failed heap=%lu ctrl=%d blue=%d",
+            static_cast<unsigned long>(
+                heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+            static_cast<int>(esp_bt_controller_get_status()),
+            static_cast<int>(esp_bluedroid_get_status()));
+        return Result<void>::fail(ErrorCode::HardwareError);
+    }
+
     _scanner=BLEDevice::getScan();
     if (!_scanner)return Result<void>::fail(ErrorCode::HardwareError);
     _scanner->setActiveScan(true);
     _scanner->setInterval(100);
     _scanner->setWindow(80);
     _initialized=true;
+    _logger.info(
+        "Bluetooth LE ready heap=%lu ctrl=%d blue=%d",
+        static_cast<unsigned long>(
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+        static_cast<int>(esp_bt_controller_get_status()),
+        static_cast<int>(esp_bluedroid_get_status()));
     return Result<void>::ok();
 }
 Result<void> BluetoothLE::scan(uint16_t seconds) {
@@ -40,13 +62,13 @@ Result<void> BluetoothLE::scan(uint16_t seconds) {
         return Result<void>::ok();
     }
 
-    _instance=this;
+    _instance.store(this, std::memory_order_release);
     _scanning=true;
     if (xTaskCreatePinnedToCore(
             worker,"bt_ble_scan", 6144, nullptr, 1, nullptr,
             config::BT_SCAN_TASK_CORE)!=pdPASS) {
         _scanning=false;
-        _instance=nullptr;
+        _instance.store(nullptr, std::memory_order_release);
         return Result<void>::fail(ErrorCode::HardwareError);
     }
 
@@ -61,7 +83,8 @@ Result<void> BluetoothLE::stop() {
     return Result<void>::ok();
 }
 void BluetoothLE::worker(void*) {
-    if (_instance)_instance->runWorker();
+    auto* instance = _instance.load(std::memory_order_acquire);
+    if (instance) instance->runWorker();
     vTaskDelete(nullptr);
 }
 void BluetoothLE::runWorker() {
@@ -83,7 +106,7 @@ void BluetoothLE::runWorker() {
     }
     if (_scanner)_scanner->clearResults();
     _scanning.store(false, std::memory_order_relaxed);
-    _instance=nullptr;
+    _instance.store(nullptr, std::memory_order_release);
     _done.store(true, std::memory_order_release);
 }
 void BluetoothLE::update() {
@@ -103,7 +126,7 @@ void BluetoothLE::update() {
                     worker,"bt_ble_scan", 6144, nullptr, 1, nullptr,
                     config::BT_SCAN_TASK_CORE)!=pdPASS) {
                 _scanning=false;
-                _instance=nullptr;
+                _instance.store(nullptr, std::memory_order_release);
                 uint8_t countPayload[2]{};
                 _events.publish({EventType::BluetoothBleScanDone, countPayload, sizeof(countPayload)});
                 _logger.error("Bluetooth LE scan task creation failed");
@@ -111,9 +134,17 @@ void BluetoothLE::update() {
         }
     }
 
-    if (!_done.exchange(false, std::memory_order_acquire))return;
-    for (uint8_t i=0;i<MAX_ENTRIES;++i) {
-        const auto&e=_entries[i];
+    if (_done.exchange(false, std::memory_order_acquire)) {
+        _publishIndex = 0;
+        _publishing = true;
+    }
+
+    if (!_publishing)return;
+
+    uint8_t published = 0;
+    while (published < PUBLISH_ENTRIES_PER_UPDATE &&
+           _publishIndex < MAX_ENTRIES) {
+        const auto&e=_entries[_publishIndex++];
         if (!e.used)continue;
         String address=e.address.length()>17?e.address.substring(0, 17):e.address;
         String name=e.name.length()?e.name:String("(unknown)");
