@@ -31,11 +31,12 @@ public:
         return _scanStartPending;
     }
     bool busy() const {
-        return _scanning || _scanStartPending;
+        return _scanning || _scanStartPending || _publishing;
     }
     void update();
 private:
     static constexpr uint8_t MAX_ENTRIES = 32;
+    static constexpr uint8_t PUBLISH_ENTRIES_PER_UPDATE = 4;
     ILogger& _logger;
     IEventSink& _events;
     BLEScan* _scanner{
@@ -46,6 +47,8 @@ private:
     bool _scanStartPending{
         false
     };
+    bool _publishing{false};
+    uint8_t _publishIndex{0};
     bool _initialized{
         false
     };
@@ -56,7 +59,7 @@ private:
     uint8_t _count{
         0
     };
-    static BluetoothLE* _instance;
+    static std::atomic<BluetoothLE*> _instance;
     static void worker(void*);
     void runWorker();
     void clearEntries();
