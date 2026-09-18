@@ -1,6 +1,6 @@
 # Protocol
 
-Wire protocol version: **1**. Firmware semantic version: **2.3.9**. These versions are intentionally independent.
+Wire protocol version: **1**. Firmware semantic version: **2.3.10**. These versions are intentionally independent.
 
 Frame:
 
@@ -43,7 +43,9 @@ The machine-readable protocol registry is `docs/protocol-schema.json`. Tests com
 Control commands are classified by their wire-level completion semantics:
 
 - **Immediate** commands complete their work before the response is sent.
-- **Accepted/Asynchronous** commands return `Success` as an acceptance acknowledgement and continue through the service state machine; completion/failure is reported through events. This includes A2DP connect-by-address, connect-by-name, and automatic reconnect.
+- **Accepted/Asynchronous** commands return `Success` as an acceptance acknowledgement and continue through the service state machine; completion/failure is reported through events. This includes Wi-Fi scan/connect, Bluetooth Classic scan, BLE scan, and A2DP connect-by-address, connect-by-name, and automatic reconnect.
+- For cold-start Bluetooth Classic/BLE scans, the acceptance response is emitted before the first-use framework stack initialization; initialization/start failure is reported through the corresponding scan-completion event and structured ESP log.
+- Wi-Fi scan results are published in bounded batches so the fixed domain EventQueue is drained between application service phases and `WIFI_SCAN_DONE` remains ordered after the final result.
 - **Blocking request** commands keep one request/response transaction open while waiting for an explicitly requested timeout, such as TCP/UDP receive.
 
 The host uses one outstanding control transaction at a time. An event is never consumed as a response.

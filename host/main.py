@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 from audio_config import AudioProfile, DEFAULT_AUDIO_PROFILE, SUPPORTED_SAMPLE_RATES, SUPPORTED_CHANNELS, AUDIO_BLOCK_SAMPLES, format_audio_profile
 from audio_transport import SerialAudioTransport
@@ -45,7 +46,8 @@ def fail_line(name: str, detail: str) -> None:
     print(f"[FAIL] {name}: {detail}")
 
 
-EXPECTED_FIRMWARE_VERSION = "2.3.9"
+VERSION_FILE = Path(__file__).resolve().parents[1] / "VERSION.txt"
+EXPECTED_FIRMWARE_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip()
 
 
 def print_system_tests(device: Esp32Device) -> None:

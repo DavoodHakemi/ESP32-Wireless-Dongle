@@ -159,6 +159,32 @@ def test_legacy_audio_status_payload_is_preserved():
     assert 'uint8_t p[36]{}' in source
 
 
+
+
+def test_wifi_scan_results_are_streamed_in_bounded_batches():
+    header = text("include/services/wifi/WiFiManager.h")
+    source = text("src/services/wifi/WiFiManager.cpp")
+    assert "MAX_SCAN_RESULTS_PER_UPDATE = 8" in header
+    assert "_scanPublishing" in header
+    assert "_scanIndex" in header
+    assert "if (_scanIndex < count)" in source
+
+
+def test_bluetooth_cold_start_scan_is_deferred_out_of_command_path():
+    classic = text("include/services/bluetooth/BluetoothClassic.h") + text("src/services/bluetooth/BluetoothClassic.cpp")
+    ble = text("include/services/bluetooth/BluetoothLE.h") + text("src/services/bluetooth/BluetoothLE.cpp")
+    assert "_scanStartPending" in classic
+    assert "startScanNow()" in classic
+    assert "_scanStartPending" in ble
+    assert "BLEDevice::init" in ble
+
+
+def test_application_drains_events_between_service_updates():
+    source = text("src/application/DongleApplication.cpp")
+    assert source.count("drainEvents();") >= 4
+    assert "void DongleApplication::drainEvents()" in source
+
+
 def test_auto_reconnect_keeps_fallback_state():
     source = text("src/services/a2dp/A2DPManager.cpp")
     assert '_autoMode = true;' in source and '_fallbackName = name;' in source and '_fallbackAttempted = false;' in source
@@ -199,3 +225,26 @@ def test_a2dp_timeout_restores_classic_before_failure_event():
     assert '_source.beginStop();' in source
     assert '_bluetooth.classic.restoreAfterA2dp();' in source
     assert timeout.index('beginShutdown(ShutdownReason::ConnectFailed') < len(timeout)
+
+
+def test_a2dp_playback_state_reset_is_callback_owned():
+    header = text("include/services/a2dp/A2DPManager.h")
+    source = text("src/services/a2dp/A2DPManager.cpp")
+    assert "_playbackResetPending" in header
+    assert "_playbackResetPending = true;" in source
+    assert "if (_playbackResetPending)" in source
+    assert "_audioSampleIndex = 0;" in source
+
+
+def test_cross_task_scan_completion_flags_are_atomic():
+    classic = text("include/services/bluetooth/BluetoothClassic.h")
+    ble = text("include/services/bluetooth/BluetoothLE.h")
+    assert "#include <atomic>" in classic and "std::atomic_bool _scanning" in classic
+    assert "std::atomic_bool _scanCompletionPending" in classic
+    assert "#include <atomic>" in ble and "std::atomic_bool _scanning" in ble
+    assert "std::atomic_bool _done" in ble
+
+
+def test_changelog_has_single_root_header():
+    changelog = text("CHANGELOG.md")
+    assert changelog.count("# Changelog") == 1

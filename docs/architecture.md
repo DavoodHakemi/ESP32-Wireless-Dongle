@@ -49,3 +49,27 @@ The third-party A2DP library has a callback without a context for Classic name s
 ### Asynchronous A2DP startup
 
 The ESP32-A2DP library performs a startup delay while bringing up its Bluetooth/A2DP stack. `A2DPSourceAdapter` isolates this blocking third-party call in a one-shot FreeRTOS task so the application update loop and protocol command path remain responsive. The command returns an immediate acknowledgement while the A2DP state machine continues asynchronously.
+
+
+## Application scheduling contract
+
+`DongleApplication::update()` preserves the legacy service order:
+
+```text
+UART RX / command dispatch
+        |
+        v
+WiFi.update -> drain events
+        v
+Network.update -> drain events
+        v
+Bluetooth.update -> drain events
+        v
+A2DP.update -> drain events
+```
+
+Command responses are written immediately from the protocol dispatcher. Domain events are drained only from the application task, after each service phase, so asynchronous event traffic cannot overtake a command response or remain queued behind another service's burst.
+
+The EventQueue is deliberately fixed at 65 records: Classic discovery can emit up to 32 device-found events, 32 detail events, and one completion event. Wi-Fi scan publication therefore uses bounded batches rather than relying on a larger queue.
+
+Cold-start Bluetooth Classic/BLE scan initialization is deferred from the command path into the corresponding service update. The acceptance response therefore remains bounded by the protocol/transport path, while completion and initialization failures remain asynchronous service events.

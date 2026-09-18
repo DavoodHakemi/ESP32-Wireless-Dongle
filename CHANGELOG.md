@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.10
+
+- Restored the asynchronous command boundary for cold-start Bluetooth Classic and BLE scans so first-use stack initialization cannot delay command acknowledgements.
+- Bounded Wi-Fi scan event publication to fixed-size batches so `WIFI_SCAN_DONE` cannot be lost when many access points are discovered.
+- Drained domain events between service updates to preserve the legacy processing order and reduce queue burst pressure.
+- Split the A2DP Classic-device discovery callback flag from the application notification flag to eliminate state races during deferred callback processing.
+- Host firmware-version validation now reads `VERSION.txt` instead of maintaining a second hard-coded version string.
+
 ## 2.3.9
 
 - Restored `BluetoothA2DPSource::start()` to the main application loop; the A2DP library already owns its internal FreeRTOS worker task.
@@ -23,8 +31,6 @@
 ## 2.3.5
 - Reduced the fixed EventQueue capacity from 72 to 32 records to fit ESP32-WROOM-32 DRAM without changing event payload limits or protocol behavior.
 - Retained the 336-byte event payload size for BLE detail events.
-
-# Changelog
 
 ## 2.3.5
 - Added a fixed-size thread-safe domain EventQueue between service/callback producers and ProtocolCodec transport output.

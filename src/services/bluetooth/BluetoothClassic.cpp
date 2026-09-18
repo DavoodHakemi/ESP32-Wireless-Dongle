@@ -90,28 +90,56 @@ void BluetoothClassic::handleGapEvent(esp_bt_gap_cb_event_t event, esp_bt_gap_cb
         }
     }
     else if (event==ESP_BT_GAP_DISC_STATE_CHANGED_EVT&&param->disc_st_chg.state==ESP_BT_GAP_DISCOVERY_STOPPED) {
-        _scanning=false;
-        _scanCompletionPending=true;
+        _scanning.store(false, std::memory_order_relaxed);
+        _scanCompletionPending.store(true, std::memory_order_release);
     }
 }
 Result<void> BluetoothClassic::scan(uint16_t seconds) {
-    if (!_initialized) {
-        auto r=begin();
-        if (!r.success)return r;
+    if (_scanning || _scanStartPending) {
+        return Result<void>::fail(ErrorCode::Busy);
     }
-    if (_scanning)return Result<void>::fail(ErrorCode::Busy);
+
+    _scanSeconds=seconds?constrain(seconds, (uint16_t)1, (uint16_t)30):10;
+
+    // Keep the command-response path non-blocking on first use. BluetoothSerial::begin()
+    // may require stack initialization time, so defer only the cold-start begin()
+    // to update(). Once initialized, the legacy scan start remains synchronous.
+    if (!_initialized) {
+        _scanStartPending = true;
+        return Result<void>::ok();
+    }
+
+    return startScanNow();
+}
+
+Result<void> BluetoothClassic::startScanNow() {
     _callbackInstance=this;
     memset(_entries, 0, sizeof(_entries));
     _count=0;
     _scanCompletionPending=false;
-    _scanSeconds=seconds?constrain(seconds, (uint16_t)1, (uint16_t)30):10;
-    if (esp_bt_gap_register_callback(gapCallback)!=ESP_OK)return Result<void>::fail(ErrorCode::HardwareError);
-    const uint8_t inq=static_cast<uint8_t>(constrain((static_cast<uint32_t>(_scanSeconds)*25U+31U)/32U, 1U, 48U));
-    if (esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, inq, 0)!=ESP_OK)return Result<void>::fail(ErrorCode::ScanFailed);
+
+    if (esp_bt_gap_register_callback(gapCallback)!=ESP_OK) {
+        _callbackInstance=nullptr;
+        return Result<void>::fail(ErrorCode::HardwareError);
+    }
+
+    const uint8_t inq=static_cast<uint8_t>(
+        constrain((static_cast<uint32_t>(_scanSeconds)*25U+31U)/32U, 1U, 48U));
+
+    if (esp_bt_gap_start_discovery(
+            ESP_BT_INQ_MODE_GENERAL_INQUIRY, inq, 0)!=ESP_OK) {
+        _callbackInstance=nullptr;
+        return Result<void>::fail(ErrorCode::ScanFailed);
+    }
+
     _scanning=true;
     return Result<void>::ok();
 }
 Result<void> BluetoothClassic::stopScan() {
+    if (_scanStartPending) {
+        _scanStartPending=false;
+        return Result<void>::ok();
+    }
     if (!_scanning)return Result<void>::ok();
     esp_bt_gap_cancel_discovery();
     return Result<void>::ok();
@@ -172,8 +200,30 @@ void BluetoothClassic::finishScan() {
     }
 }
 void BluetoothClassic::update() {
-    if (_scanCompletionPending) {
-        _scanCompletionPending=false;
+    if (_scanStartPending) {
+        _scanStartPending=false;
+
+        if (!_initialized) {
+            const auto initialized=begin();
+            if (!initialized.success) {
+                uint8_t countPayload[2]{};
+                _events.publish({EventType::BluetoothScanDone, countPayload, sizeof(countPayload)});
+                _logger.error("Bluetooth Classic scan initialization failed");
+                return;
+            }
+        }
+
+        const auto started=startScanNow();
+        if (!started.success) {
+            uint8_t countPayload[2]{};
+            _events.publish({EventType::BluetoothScanDone, countPayload, sizeof(countPayload)});
+            _logger.error(
+                "Bluetooth Classic scan start failed: error=%d",
+                static_cast<int>(started.error));
+        }
+    }
+
+    if (_scanCompletionPending.exchange(false, std::memory_order_acquire)) {
         finishScan();
         _count=0;
     }
@@ -224,6 +274,9 @@ String BluetoothClassic::localAddress() {
     return _initialized?_serial.getBtAddressString():String();
 }
 void BluetoothClassic::suspendForA2dp() {
+    if (_scanStartPending) {
+        _scanStartPending=false;
+    }
     if (_scanning)stopScan();
     if (_serial.connected())_serial.disconnect();
     if (_initialized) {

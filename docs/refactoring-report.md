@@ -55,3 +55,13 @@ The first modular package exposed four integration defects when compiled against
 - Audio buffer counters and underrun flag access now use the existing FreeRTOS critical section instead of volatile increments, removing the compiler's volatile deprecation warnings while keeping the ISR/task boundary explicit.
 
 This package deliberately remains pinned to ESP32-A2DP v1.8.10 because that is the compatibility point established by the actual Arduino-ESP32 3.0.7 environment.
+
+
+## 2.3.10 Reliability follow-up
+
+The modular implementation is now explicitly aligned with the asynchronous behavior of the Arduino 2.2.7 baseline at subsystem boundaries:
+
+- Wi-Fi scan result publication is bounded per application update so the fixed EventQueue cannot overflow before `WIFI_SCAN_DONE` is emitted.
+- Cold-start Bluetooth Classic/BLE initialization is deferred from the command dispatch path into the service update phase, preserving the immediate response contract.
+- Application event delivery is drained between service updates, restoring the legacy Wi-Fi → Network → Bluetooth → A2DP processing order more closely.
+- A2DP Classic-device discovery callback state and application notification state are separate flags.

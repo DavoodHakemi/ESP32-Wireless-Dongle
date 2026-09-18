@@ -18,8 +18,8 @@ def test_events_are_queued_before_wire_output():
 
 def test_event_queue_is_fixed_size_and_copies_payloads():
     source = (ROOT / "include/core/EventQueue.h").read_text()
-    assert "static constexpr uint8_t CAPACITY = 32;" in source
-    assert "static constexpr uint16_t MAX_PAYLOAD = 336;" in source
+    assert "static constexpr uint8_t CAPACITY = 65;" in source
+    assert "static constexpr uint16_t MAX_PAYLOAD = 328;" in source
     assert "std::memcpy(record.payload, event.payload, event.length);" in source
     assert "portENTER_CRITICAL" in source
 
@@ -27,8 +27,8 @@ def test_event_queue_is_fixed_size_and_copies_payloads():
 def test_firmware_version_is_consistent():
     version = (ROOT / "VERSION.txt").read_text().strip()
     header = (ROOT / "include/config/Version.h").read_text()
-    assert version == "2.3.9"
-    assert '#define DONGLE_FIRMWARE_VERSION "2.3.9"' in header
+    assert version == "2.3.10"
+    assert '#define DONGLE_FIRMWARE_VERSION "2.3.10"' in header
 
 
 def test_boot_events_are_held_until_protocol_handshake():

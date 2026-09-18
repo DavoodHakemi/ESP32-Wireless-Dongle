@@ -29,3 +29,40 @@ Bluetooth link state and media state are stored separately. A short disconnect c
 ## Bluetooth Classic / BLE
 
 Classic SPP and BLE scan services have separate state and bounded scan tables. A2DP temporarily suspends Classic SPP before starting its source stack.
+
+
+### Wi-Fi scan publication
+
+```text
+Idle
+  | SCAN request
+  v
+Scanning
+  | framework reports completion
+  v
+PublishingBatch[0..N]
+  | one bounded batch per application update
+  v
+Idle + WIFI_SCAN_DONE
+```
+
+The scan result set is retained until all result events have been queued and `WIFI_SCAN_DONE` is queued. This prevents a large scan result set from overflowing the fixed EventQueue before completion.
+
+### Bluetooth Classic / BLE cold-start scan
+
+```text
+Idle
+  | SCAN request
+  v
+StartPending
+  | next service update
+  +--> Initializing --> Scanning --> Done
+  |
+  +--> InitializationFailure --> Done(0)
+```
+
+The command response is sent before `StartPending` is executed. This preserves the original asynchronous command boundary even when the first framework initialization is relatively expensive.
+
+### A2DP playback reset boundary
+
+Playback cursor/buffer state is callback-owned. Application-task operations such as `startAudio`, `stopAudio`, and connection reset only raise a protected reset request; the A2DP frame callback consumes that request and resets its playback cursor state in its own execution context.

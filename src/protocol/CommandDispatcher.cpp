@@ -316,7 +316,7 @@ void CommandDispatcher::onCommand(const ProtocolCommand& c) {
             response(c, StatusCode::Success, p, 3);
             break;
         }
-    case CommandId::BluetoothScanStart:if (_a2dp.status().active||_a2dp.status().connecting||_bluetooth.ble.scanning()) {
+    case CommandId::BluetoothScanStart:if (_a2dp.status().active||_a2dp.status().connecting||_bluetooth.ble.busy()||_bluetooth.classic.connecting()) {
             response(c, StatusCode::Busy);
             break;
         }
@@ -328,8 +328,9 @@ void CommandDispatcher::onCommand(const ProtocolCommand& c) {
         break;
     case CommandId::BluetoothScanStop:response(c, mapError(_bluetooth.classic.stopScan().error));
         break;
-    case CommandId::BluetoothConnect:if (_a2dp.status().active||_a2dp.status().connecting||c.length!=17) {
-            response(c, _a2dp.status().active||_a2dp.status().connecting?StatusCode::Busy:StatusCode::InvalidParameter);
+    case CommandId::BluetoothConnect:if (_a2dp.status().active||_a2dp.status().connecting||_bluetooth.classic.busy()||_bluetooth.ble.busy()||c.length!=17) {
+            const bool busy=_a2dp.status().active||_a2dp.status().connecting||_bluetooth.classic.busy()||_bluetooth.ble.busy();
+            response(c, busy?StatusCode::Busy:StatusCode::InvalidParameter);
             break;
         }
         {
@@ -340,7 +341,7 @@ void CommandDispatcher::onCommand(const ProtocolCommand& c) {
         }
     case CommandId::BluetoothDisconnect:response(c, mapError(_bluetooth.classic.disconnect().error));
         break;
-    case CommandId::BluetoothBleScanStart:if (_a2dp.status().active||_a2dp.status().connecting||_bluetooth.classic.scanning()) {
+    case CommandId::BluetoothBleScanStart:if (_a2dp.status().active||_a2dp.status().connecting||_bluetooth.classic.busy()) {
             response(c, StatusCode::Busy);
             break;
         }
@@ -365,7 +366,11 @@ void CommandDispatcher::onCommand(const ProtocolCommand& c) {
             response(c, StatusCode::Success, p, sizeof(p));
             break;
         }
-    case CommandId::A2dpConnect:if (c.length!=17) {
+    case CommandId::A2dpConnect:if (_bluetooth.classic.busy()||_bluetooth.ble.busy()) {
+            response(c, StatusCode::Busy);
+            break;
+        }
+        if (c.length!=17) {
             response(c, StatusCode::InvalidParameter);
             break;
         }
@@ -375,7 +380,11 @@ void CommandDispatcher::onCommand(const ProtocolCommand& c) {
             response(c, mapError(_a2dp.connectByAddress(a).error));
             break;
         }
-    case CommandId::A2dpConnectName:if (c.length==0||c.length>64) {
+    case CommandId::A2dpConnectName:if (_bluetooth.classic.busy()||_bluetooth.ble.busy()) {
+            response(c, StatusCode::Busy);
+            break;
+        }
+        if (c.length==0||c.length>64) {
             response(c, StatusCode::InvalidParameter);
             break;
         }
@@ -385,7 +394,11 @@ void CommandDispatcher::onCommand(const ProtocolCommand& c) {
             response(c, mapError(_a2dp.connectByName(n).error));
             break;
         }
-    case CommandId::A2dpConnectAuto:if (c.length) {
+    case CommandId::A2dpConnectAuto:if (_bluetooth.classic.busy()||_bluetooth.ble.busy()) {
+            response(c, StatusCode::Busy);
+            break;
+        }
+        if (c.length) {
             response(c, StatusCode::InvalidParameter);
             break;
         }

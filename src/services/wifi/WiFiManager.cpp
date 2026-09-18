@@ -9,7 +9,9 @@ Result<void> WiFiManager::begin() {
     return Result<void>::ok();
 }
 Result<void> WiFiManager::scan() {
-    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) return Result<void>::fail(ErrorCode::Busy);
+    if (_scanPublishing || WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+        return Result<void>::fail(ErrorCode::Busy);
+    }
     WiFi.scanDelete();
     return WiFi.scanNetworks(true, true) == WIFI_SCAN_FAILED
     ? Result<void>::fail(ErrorCode::ScanFailed) : Result<void>::ok();
@@ -43,9 +45,28 @@ Status WiFiManager::status() const {
     return result;
 }
 void WiFiManager::publishScanResults() {
-    const int16_t count = WiFi.scanComplete();
-    if (count < 0) return;
-    for (int16_t i = 0; i < count; ++i) {
+    const int16_t completed = WiFi.scanComplete();
+
+    if (!_scanPublishing && completed >= 0) {
+        _scanPublishing = true;
+        _scanCount = completed;
+        _scanIndex = 0;
+    }
+
+    if (!_scanPublishing) {
+        return;
+    }
+
+    const uint16_t count = static_cast<uint16_t>(_scanCount < 0 ? 0 : _scanCount);
+    const uint16_t remaining = count > _scanIndex
+        ? static_cast<uint16_t>(count - _scanIndex)
+        : 0;
+    const uint16_t batch = remaining > MAX_SCAN_RESULTS_PER_UPDATE
+        ? MAX_SCAN_RESULTS_PER_UPDATE
+        : remaining;
+
+    for (uint16_t n = 0; n < batch; ++n) {
+        const uint16_t i = static_cast<uint16_t>(_scanIndex + n);
         String ssid = WiFi.SSID(i);
         if (ssid.length() > 32) ssid = ssid.substring(0, 32);
         const int16_t rssi = static_cast<int16_t>(WiFi.RSSI(i));
@@ -62,12 +83,24 @@ void WiFiManager::publishScanResults() {
         payload[offset + 3] = auth;
         _events.publish({EventType::WifiNetworkFound, payload, static_cast<uint16_t>(offset + 4)});
     }
+
+    _scanIndex = static_cast<uint16_t>(_scanIndex + batch);
+
+    if (_scanIndex < count) {
+        return;
+    }
+
     uint8_t countPayload[2] = {
-        static_cast<uint8_t>(count & 0xFF), static_cast<uint8_t>(count >> 8)
+        static_cast<uint8_t>(count & 0xFF),
+        static_cast<uint8_t>(count >> 8)
     };
     _events.publish({EventType::WifiScanDone, countPayload, sizeof(countPayload)});
     WiFi.scanDelete();
+    _scanPublishing = false;
+    _scanCount = -1;
+    _scanIndex = 0;
 }
+
 void WiFiManager::publishConnected() {
     String ssid = WiFi.SSID();
     if (ssid.length() > 32) ssid = ssid.substring(0, 32);

@@ -53,7 +53,8 @@ private:
     bool _connectionEventPending{false};
     bool _audioStartedPending{false};
     bool _audioStoppedPending{false};
-    bool _classicFoundPending{false};
+    bool _classicFoundCallbackPending{false};
+    bool _classicFoundEventPending{false};
     bool _disconnectCandidate{false};
     bool _disconnectHadAudio{false};
     uint32_t _disconnectSince{0};
@@ -69,6 +70,7 @@ private:
     bool _toneReady{false};
     uint8_t _audioBlock[config::AUDIO_HEADER_BYTES + config::AUDIO_BLOCK_SAMPLES * 4]{};
     bool _audioBlockLoaded{false};
+    bool _playbackResetPending{false};
     uint16_t _audioSampleIndex{0};
     uint8_t _audioRepeatPhase{0};
     int16_t _audioLeft{0};

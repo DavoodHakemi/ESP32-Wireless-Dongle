@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <BluetoothSerial.h>
 #include <esp_gap_bt_api.h>
 #include "core/Result.h"
@@ -39,6 +40,12 @@ public:
     bool scanning() const {
         return _scanning;
     }
+    bool scanPending() const {
+        return _scanStartPending;
+    }
+    bool busy() const {
+        return _scanning || _scanStartPending || _connecting;
+    }
     bool connecting() const {
         return _connecting;
     }
@@ -54,16 +61,11 @@ private:
     BluetoothSerial _serial;
     ILogger& _logger;
     IEventSink& _events;
-    bool _initialized{
-        false
-    }
-    , _scanning{
-        false
-    }
-    , _connecting{
-        false
-    };
-    bool _scanCompletionPending{
+    bool _initialized{false};
+    std::atomic_bool _scanning{false};
+    bool _connecting{false};
+    std::atomic_bool _scanCompletionPending{false};
+    bool _scanStartPending{
         false
     };
     String _remoteAddress;
@@ -78,6 +80,7 @@ private:
     static void gapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
     void handleGapEvent(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
     void finishScan();
+    Result<void> startScanNow();
     int findEntry(const esp_bd_addr_t address) const;
     int allocateEntry(const esp_bd_addr_t address);
     static bool parseMac(const String& text, uint8_t out[6]);

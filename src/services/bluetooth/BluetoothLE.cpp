@@ -24,21 +24,39 @@ Result<void> BluetoothLE::begin() {
     return Result<void>::ok();
 }
 Result<void> BluetoothLE::scan(uint16_t seconds) {
-    if (_scanning)return Result<void>::fail(ErrorCode::Busy);
-    auto b=begin();
-    if (!b.success)return b;
+    if (_scanning || _scanStartPending) {
+        return Result<void>::fail(ErrorCode::Busy);
+    }
+
     _seconds=seconds?constrain(seconds, (uint16_t)1, (uint16_t)30):10;
     clearEntries();
     _done=false;
+
+    // BLEDevice::init() can be a relatively expensive first-use operation.
+    // Defer cold initialization to update() so the command response is
+    // acknowledged before stack setup begins.
+    if (!_initialized) {
+        _scanStartPending=true;
+        return Result<void>::ok();
+    }
+
     _instance=this;
     _scanning=true;
-    if (xTaskCreatePinnedToCore(worker,"bt_ble_scan", 6144, nullptr, 1, nullptr, config::BT_SCAN_TASK_CORE)!=pdPASS) {
+    if (xTaskCreatePinnedToCore(
+            worker,"bt_ble_scan", 6144, nullptr, 1, nullptr,
+            config::BT_SCAN_TASK_CORE)!=pdPASS) {
         _scanning=false;
+        _instance=nullptr;
         return Result<void>::fail(ErrorCode::HardwareError);
     }
+
     return Result<void>::ok();
 }
 Result<void> BluetoothLE::stop() {
+    if (_scanStartPending) {
+        _scanStartPending=false;
+        return Result<void>::ok();
+    }
     if (_scanning&&_scanner)_scanner->stop();
     return Result<void>::ok();
 }
@@ -64,13 +82,36 @@ void BluetoothLE::runWorker() {
         }
     }
     if (_scanner)_scanner->clearResults();
-    _scanning=false;
-    _done=true;
+    _scanning.store(false, std::memory_order_relaxed);
     _instance=nullptr;
+    _done.store(true, std::memory_order_release);
 }
 void BluetoothLE::update() {
-    if (!_done)return;
-    _done=false;
+    if (_scanStartPending) {
+        _scanStartPending=false;
+
+        const auto initialized=begin();
+        if (!initialized.success) {
+            uint8_t countPayload[2]{};
+            _events.publish({EventType::BluetoothBleScanDone, countPayload, sizeof(countPayload)});
+            _logger.error("Bluetooth LE scan initialization failed");
+        }
+        else {
+            _instance=this;
+            _scanning=true;
+            if (xTaskCreatePinnedToCore(
+                    worker,"bt_ble_scan", 6144, nullptr, 1, nullptr,
+                    config::BT_SCAN_TASK_CORE)!=pdPASS) {
+                _scanning=false;
+                _instance=nullptr;
+                uint8_t countPayload[2]{};
+                _events.publish({EventType::BluetoothBleScanDone, countPayload, sizeof(countPayload)});
+                _logger.error("Bluetooth LE scan task creation failed");
+            }
+        }
+    }
+
+    if (!_done.exchange(false, std::memory_order_acquire))return;
     for (uint8_t i=0;i<MAX_ENTRIES;++i) {
         const auto&e=_entries[i];
         if (!e.used)continue;

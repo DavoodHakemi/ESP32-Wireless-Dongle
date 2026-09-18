@@ -3,4 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
-/host/__pycache__/
+
+# Python caches
+**/__pycache__/
+*.pyc
+.pytest_cache/

@@ -34,6 +34,7 @@ private:
     services::a2dp::A2DPManager _a2dp;
     protocol::CommandDispatcher _dispatcher;
     bool _protocolReady{false};
+    void drainEvents();
 };
 
 }

@@ -79,10 +79,7 @@ void A2DPManager::resetRuntimeState() {
     _pcmStartedPending = false;
     _pcmStartedReported = false;
     _toneCommandMs = 0;
-    _audioBlockLoaded = false;
-    _audioSampleIndex = 0;
-    _audioRepeatPhase = 0;
-    _toneIndex = 0;
+    _playbackResetPending = true;
     _toneReady = false;
     portEXIT_CRITICAL(&_callbackMux);
 
@@ -92,7 +89,8 @@ void A2DPManager::resetRuntimeState() {
     _connectionEventPending = false;
     _audioStartedPending = false;
     _audioStoppedPending = false;
-    _classicFoundPending = false;
+    _classicFoundCallbackPending = false;
+    _classicFoundEventPending = false;
     _disconnectCandidate = false;
     _disconnectHadAudio = false;
     _disconnectSince = 0;
@@ -187,7 +185,7 @@ bool A2DPManager::nameSelector(
 
     portENTER_CRITICAL(&self->_callbackMux);
     memcpy(self->_pendingDiscoveredAddress, address, sizeof(self->_pendingDiscoveredAddress));
-    self->_classicFoundPending = true;
+    self->_classicFoundCallbackPending = true;
     portEXIT_CRITICAL(&self->_callbackMux);
     return true;
 }
@@ -239,6 +237,15 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
     bool tone = false;
     bool toneReady = false;
     portENTER_CRITICAL(&_callbackMux);
+    if (_playbackResetPending) {
+        _audioBlockLoaded = false;
+        _audioSampleIndex = 0;
+        _audioRepeatPhase = 0;
+        _audioLeft = 0;
+        _audioRight = 0;
+        _toneIndex = 0;
+        _playbackResetPending = false;
+    }
     tone = _tone;
     toneReady = _toneReady;
     portEXIT_CRITICAL(&_callbackMux);
@@ -390,8 +397,8 @@ void A2DPManager::applyPendingCallbacks() {
     audioState = _pendingAudioState;
     _pendingConnectionState = 0xFF;
     _pendingAudioState = 0xFF;
-    classicFound = _classicFoundPending;
-    _classicFoundPending = false;
+    classicFound = _classicFoundCallbackPending;
+    _classicFoundCallbackPending = false;
     memcpy(discoveredAddress, _pendingDiscoveredAddress, sizeof(discoveredAddress));
     portEXIT_CRITICAL(&_callbackMux);
 
@@ -402,7 +409,7 @@ void A2DPManager::applyPendingCallbacks() {
             discoveredAddress[3], discoveredAddress[4], discoveredAddress[5]);
         _remoteAddress = String(text);
         memcpy(_targetAddress, discoveredAddress, sizeof(_targetAddress));
-        _classicFoundPending = true;
+        _classicFoundEventPending = true;
     }
 
     if (audioState != 0xFF) {
@@ -744,6 +751,7 @@ Result<void> A2DPManager::startAudio(const AudioProfile& profile) {
 
     portENTER_CRITICAL(&_callbackMux);
     _tone = false;
+    _playbackResetPending = true;
     portEXIT_CRITICAL(&_callbackMux);
 
     const uint32_t blockBytes =
@@ -760,6 +768,9 @@ Result<void> A2DPManager::startAudio(const AudioProfile& profile) {
 
 Result<void> A2DPManager::stopAudio() {
     _audio.stop();
+    portENTER_CRITICAL(&_callbackMux);
+    _playbackResetPending = true;
+    portEXIT_CRITICAL(&_callbackMux);
     return Result<void>::ok();
 }
 
@@ -842,8 +853,8 @@ void A2DPManager::update() {
     processPendingConnection();
     applyPendingCallbacks();
 
-    if (_classicFoundPending) {
-        _classicFoundPending = false;
+    if (_classicFoundEventPending) {
+        _classicFoundEventPending = false;
         publishAddressEvent(EventType::A2dpClassicFound, _remoteAddress);
         publishAddressEvent(EventType::A2dpConnecting, _remoteAddress);
     }

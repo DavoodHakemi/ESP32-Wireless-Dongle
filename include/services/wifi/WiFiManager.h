@@ -27,6 +27,7 @@ public:
 private:
     ILogger& _logger;
     IEventSink& _events;
+    static constexpr uint8_t MAX_SCAN_RESULTS_PER_UPDATE = 8;
     bool _connecting{
         false
     };
@@ -39,6 +40,9 @@ private:
     wl_status_t _lastStatus{
         WL_IDLE_STATUS
     };
+    bool _scanPublishing{false};
+    int16_t _scanCount{-1};
+    uint16_t _scanIndex{0};
     void publishScanResults();
     void publishConnected();
 };

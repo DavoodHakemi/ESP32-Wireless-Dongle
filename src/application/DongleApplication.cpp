@@ -87,10 +87,15 @@ void DongleApplication::update() {
     }
     _transport.update();
     _wifi.update();
+    drainEvents();
     _network.update();
+    drainEvents();
     _bluetooth.update();
+    drainEvents();
     _a2dp.update();
-
+    drainEvents();
+}
+void DongleApplication::drainEvents() {
     if (!_protocolReady) {
         return;
     }
@@ -103,6 +108,7 @@ void DongleApplication::update() {
             event.length);
     }
 }
+
 void DongleApplication::onCommand(
     const protocol::ProtocolCommand& command) {
     _dispatcher.onCommand(command);

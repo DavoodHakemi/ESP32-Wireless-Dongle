@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <BLEDevice.h>
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
@@ -26,6 +27,12 @@ public:
     bool scanning() const {
         return _scanning;
     }
+    bool scanPending() const {
+        return _scanStartPending;
+    }
+    bool busy() const {
+        return _scanning || _scanStartPending;
+    }
     void update();
 private:
     static constexpr uint8_t MAX_ENTRIES = 32;
@@ -34,10 +41,9 @@ private:
     BLEScan* _scanner{
         nullptr
     };
-    volatile bool _scanning{
-        false
-    };
-    volatile bool _done{
+    std::atomic_bool _scanning{false};
+    std::atomic_bool _done{false};
+    bool _scanStartPending{
         false
     };
     bool _initialized{

@@ -21,12 +21,18 @@ def test_a2dp_host_wait_exceeds_firmware_timeout():
     main = (ROOT / "host/main.py").read_text(encoding="utf-8")
 
     timeout_match = re.search(r"A2DP_CONNECT_TIMEOUT_MS\s*=\s*(\d+)", config)
-    wait_match = re.search(r"_wait_a2dp_result\(device, wait_seconds: float = ([0-9.]+)\)", main)
+    wait_match = re.search(r"_wait_a2dp_result\(device: Esp32Device, wait_seconds: float = ([0-9.]+)\)", main)
     assert timeout_match and wait_match
     assert float(wait_match.group(1)) * 1000.0 > int(timeout_match.group(1))
 
 
-def test_a2dp_auto_uses_fast_library_fallback_budget():
+def test_a2dp_auto_uses_library_name_fallback_without_extra_retry_budget():
     manager = (ROOT / "src/services/a2dp/A2DPManager.cpp").read_text(encoding="utf-8")
-    assert "_pendingRetries = 1;" in manager
-    assert "Three retries would push the library's discovery fallback beyond" in manager
+    assert "_pendingRetries = 0;" in manager
+    assert "Classic name inquiry" in manager
+
+
+def test_host_reads_firmware_version_from_project_source_of_truth():
+    main = (ROOT / "host/main.py").read_text(encoding="utf-8")
+    assert 'VERSION_FILE = Path(__file__).resolve().parents[1] / "VERSION.txt"' in main
+    assert 'EXPECTED_FIRMWARE_VERSION = VERSION_FILE.read_text' in main
