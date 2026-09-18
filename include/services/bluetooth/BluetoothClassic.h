@@ -44,7 +44,8 @@ public:
         return _scanStartPending;
     }
     bool busy() const {
-        return _scanning || _scanStartPending || _connecting;
+        return _scanning || _scanStartPending || _scanPublishing ||
+               _restoreAfterScanPending || _connecting;
     }
     bool connecting() const {
         return _connecting;
@@ -58,6 +59,7 @@ public:
     void restoreAfterA2dp();
 private:
     static constexpr uint8_t MAX_ENTRIES = 32;
+    static constexpr uint8_t PUBLISH_ENTRIES_PER_UPDATE = 4;
     BluetoothSerial _serial;
     ILogger& _logger;
     IEventSink& _events;
@@ -76,10 +78,11 @@ private:
     uint16_t _scanSeconds{
         10
     };
-    static BluetoothClassic* _callbackInstance;
+    static std::atomic<BluetoothClassic*> _callbackInstance;
     static void gapCallback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
     void handleGapEvent(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
-    void finishScan();
+    void startScanPublication();
+    void publishScanBatch();
     Result<void> startScanNow();
     int findEntry(const esp_bd_addr_t address) const;
     int allocateEntry(const esp_bd_addr_t address);
