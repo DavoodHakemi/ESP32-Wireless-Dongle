@@ -12,14 +12,14 @@ namespace dongle {
 
 class EventQueue final {
 public:
-    // A Classic Bluetooth scan can emit two events per entry plus a completion
-    // event (32 entries => 65 events). BLE emits one event per entry plus
-    // completion, and Wi-Fi scans can produce larger bursts. The queue must
-    // absorb a complete service update burst before DongleApplication drains it.
-    static constexpr uint8_t CAPACITY = 65;
-    static constexpr uint8_t MIN_SCAN_BURST_CAPACITY = 65;
+    // Scan publishers emit bounded batches. Classic/Wi-Fi publish at most
+    // four entries per update plus SCAN_DONE, so nine records are the largest
+    // scan burst. Keep substantial headroom while avoiding a large permanent
+    // DRAM allocation on ESP32-WROOM-32.
+    static constexpr uint8_t CAPACITY = 16;
+    static constexpr uint8_t MIN_SCAN_BURST_CAPACITY = 9;
     static_assert(CAPACITY >= MIN_SCAN_BURST_CAPACITY,
-        "EventQueue capacity must absorb a complete Classic Bluetooth scan burst");
+        "EventQueue capacity must absorb a bounded scan publication burst");
 
     // Largest current event payload is the BLE device event:
     // 1+17 address + 1+64 name + 1 RSSI + 2 detail length + 240 details + 1 flag = 327.

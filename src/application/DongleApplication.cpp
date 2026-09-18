@@ -92,6 +92,7 @@ void DongleApplication::update() {
     drainEvents();
     _bluetooth.update();
     drainEvents();
+    _bluetooth.postUpdate();
     _a2dp.update();
     drainEvents();
 }

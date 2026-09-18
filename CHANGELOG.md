@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.11
+
+- Reworked Classic Bluetooth discovery to start GAP discovery directly while leaving BluetoothSerial as the sole GAP callback owner and scan-result collector; no second callback or scan task is created.
+- Removed post-scan BluetoothSerial teardown/reinitialization because the framework-owned discovery path preserves the SPP/GAP lifecycle.
+- Restored post-event lifecycle ordering without changing the wire protocol or command/event IDs.
+- Fixed BLE scan publication completion so `BT_BLE_SCAN_DONE` is emitted once after all bounded publication batches are drained.
+- Added bounded BLE scan watchdog diagnostics and exposed existing firmware SerialLog events during host-side Bluetooth scan tests.
+- Preserved A2DP direct-MAC selection, name fallback ownership and all existing Bluetooth, BLE and A2DP wire command/event IDs.
+- Removed the Classic discovery worker task after hardware evidence showed that even a 3072-byte task could not be allocated while BLE resources were active.
+- Reworked BLE scanning to use the Arduino-ESP32 asynchronous `BLEScan::start(duration, callback, false)` API without a dedicated scan task.
+
+
 ## 2.3.10
 
 - Restored the asynchronous command boundary for cold-start Bluetooth Classic and BLE scans so first-use stack initialization cannot delay command acknowledgements.
@@ -48,7 +60,6 @@
 # 2.3.1 — Modular Architecture Refactor
 
 - Replaced the monolithic firmware implementation with layered Application / Protocol / Transport / Service / Utility modules.
-- Added `ITransport`, domain `Result`/`ErrorCode`, domain events, typed subsystem states and centralized protocol-backed logging.
 - Preserved legacy wire command/event IDs and the 36-byte `AUDIO_STATUS` response layout.
 - Preserved ESP32-WROOM-32 / Arduino-ESP32 3.0.7 compatibility and pinned ESP32-A2DP v1.8.10.
 - Kept A2DP callbacks allocation-free and isolated from protocol/transport layers.

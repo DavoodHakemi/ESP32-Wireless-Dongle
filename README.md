@@ -1,4 +1,4 @@
-# ESP32 Wireless Dongle — Modular Architecture 2.3.10
+# ESP32 Wireless Dongle — Modular Architecture 2.3.11
 
 This package is a full architectural refactor of the ESP32 Wireless Dongle for ESP32-WROOM-32 / ESP32 DevKit V1 under PlatformIO.
 

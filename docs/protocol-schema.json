@@ -143,6 +143,6 @@
     "sequence_must_match": true,
     "status_byte": 0
   },
-  "semantic_firmware_version": "2.3.10",
+  "semantic_firmware_version": "2.3.11",
   "wire_version": 1
 }

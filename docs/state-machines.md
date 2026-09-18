@@ -56,12 +56,12 @@ Idle
   v
 StartPending
   | next service update
-  +--> Initializing --> Scanning --> Done
+  +--> Initializing --> AsyncScanning --> Publishing --> Done
   |
   +--> InitializationFailure --> Done(0)
 ```
 
-The command response is sent before `StartPending` is executed. This preserves the original asynchronous command boundary even when the first framework initialization is relatively expensive.
+The command response is sent before `StartPending` is executed. The framework-owned Classic/BLE scan APIs then run asynchronously; the application task only collects results, publishes bounded events, and closes the scan state.
 
 ### A2DP playback reset boundary
 

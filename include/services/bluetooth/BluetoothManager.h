@@ -13,6 +13,9 @@ public:
         classic.update();
         ble.update();
     }
+    void postUpdate() {
+        classic.postUpdate();
+    }
     BluetoothClassic classic;
     BluetoothLE ble;
 };
