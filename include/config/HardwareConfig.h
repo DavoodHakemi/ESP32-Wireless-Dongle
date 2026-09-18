@@ -11,8 +11,8 @@ constexpr uint32_t FLASH_FREQUENCY_HZ = 80000000UL;
 // Core 1 is reserved for the Arduino/application loop. A2DP library
 // callbacks/tasks are expected to remain compatible with that lifecycle.
 constexpr uint8_t A2DP_TASK_CORE = 1;
-// BLE discovery is a blocking library operation executed by our worker task.
-// Keep it off the application/UART core so command/response processing stays
-// responsive while a scan is running.
-constexpr uint8_t BT_SCAN_TASK_CORE = 0;
+// BLEScan::start() blocks only the worker task while the Arduino BLE GAP
+// callback releases its scan semaphore. Keep the worker on Core 1 to match
+// the known-good Arduino 2.2.7 execution context.
+constexpr uint8_t BT_SCAN_TASK_CORE = A2DP_TASK_CORE;
 }
