@@ -76,3 +76,11 @@ def test_a2dp_uses_measured_output_rate_and_phase_resampling() -> None:
     assert "_rateMeasureFrames" in manager
     assert "_audioResamplePhase += sourceRate" in manager
     assert "AUDIO_PREBUFFER_MULTIPLIER = 8" in config
+
+
+def test_pc_audio_has_silent_route_fallback() -> None:
+    source = (ROOT / "host/audio.py").read_text(encoding="utf-8")
+    assert "AUTO_ROUTE_PROBE_SECONDS = 0.05" in source
+    assert "AUTO_ROUTE_MIN_PEAK = 100" in source
+    assert "selected_peak < AUTO_ROUTE_MIN_PEAK" in source
+    assert "best_peak >= AUTO_ROUTE_MIN_PEAK" in source
