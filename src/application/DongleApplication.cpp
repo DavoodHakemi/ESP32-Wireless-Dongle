@@ -80,10 +80,12 @@ bool DongleApplication::begin() {
     return true;
 }
 void DongleApplication::update() {
-    uint8_t buffer[1024];
+    static uint8_t buffer[2048];
     if (_transport.available()) {
-        const size_t n=_transport.read(buffer, sizeof(buffer));
-        if (n)_parser.feed(buffer, static_cast<uint16_t>(n));
+        const size_t n = _transport.read(buffer, sizeof(buffer));
+        if (n) {
+            _parser.feed(buffer, static_cast<uint16_t>(n));
+        }
     }
     _transport.update();
     _wifi.update();

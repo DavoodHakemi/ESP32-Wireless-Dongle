@@ -48,7 +48,7 @@ def test_audio_stream_uses_non_flushing_serial_path() -> None:
 
     assert "self.serial.write(data)" in stream_method
     assert "self.serial.flush()" not in stream_method
-    assert "self.transport.write_stream(frame)" in esp32
+    assert 'self.transport.write_stream(b"".join(frames))' in esp32
 
 
 def test_low_latency_capture_quantum_matches_audio_read_quantum() -> None:
@@ -57,3 +57,20 @@ def test_low_latency_capture_quantum_matches_audio_read_quantum() -> None:
     assert "CAPTURE_BLOCK_FRAMES = 256" in source
     assert "CAPTURE_RECORD_FRAMES = 256" in source
     assert "CAPTURE_RECORDER_BLOCKSIZE = 256" in source
+
+
+def test_audio_transport_coalesces_complete_frames_without_changing_wire_format() -> None:
+    esp32 = (ROOT / "host/esp32.py").read_text(encoding="utf-8")
+    audio = (ROOT / "host/audio.py").read_text(encoding="utf-8")
+
+    assert 'self.transport.write_stream(b"".join(frames))' in esp32
+    assert "AUDIO_SEND_BATCH_BLOCKS = 4" in audio
+    assert 'self.send_batch(b"".join(batch))' in audio
+
+
+def test_firmware_serial_rx_budget_is_large_enough_for_batched_audio() -> None:
+    hardware = (ROOT / "include/config/HardwareConfig.h").read_text(encoding="utf-8")
+    app = (ROOT / "src/application/DongleApplication.cpp").read_text(encoding="utf-8")
+
+    assert "SERIAL_RX_BUFFER = 8192" in hardware
+    assert "static uint8_t buffer[2048]" in app

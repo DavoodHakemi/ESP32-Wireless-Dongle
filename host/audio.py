@@ -36,6 +36,7 @@ CAPTURE_RECORDER_BLOCKSIZE = 256
 # audio when UART/Windows scheduling stalled. Live playback must prefer recent
 # audio over delayed audio.
 AUDIO_QUEUE_MAX_BLOCKS = 8
+AUDIO_SEND_BATCH_BLOCKS = 4
 PROBE_SECONDS = 0.35
 LIVE_MONITOR_SECONDS = 3.0
 SELF_TEST_SECONDS = 2.0
@@ -463,22 +464,31 @@ class PcAudioStreamer:
         return np.rint(samples * 32767.0).astype(np.int16)
 
     def _run_sender(self) -> None:
-        # Pace one complete transport block at the exact PCM playback period.
-        # This prevents the old capture-thread burst pattern (two blocks emitted
-        # back-to-back after a 1024-frame WASAPI read) from becoming UART burst
-        # traffic and A2DP buffer jitter.
+        # Coalesce several complete PCM blocks into one transport write.
+        # The individual wire frames remain unchanged; only the USB-UART write
+        # boundary is larger so Windows/CP210x scheduling cannot create a
+        # starvation gap between otherwise on-time audio blocks.
         block_interval = AUDIO_BLOCK_SAMPLES / float(self.profile.sample_rate)
+        batch_interval = block_interval * AUDIO_SEND_BATCH_BLOCKS
         next_send_at: Optional[float] = None
         try:
             while True:
-                try:
-                    block = self.block_queue.get(timeout=0.05)
-                except queue.Empty:
+                batch: list[bytes] = []
+                while len(batch) < AUDIO_SEND_BATCH_BLOCKS:
+                    try:
+                        block = self.block_queue.get(timeout=0.05 if not batch else block_interval)
+                    except queue.Empty:
+                        if self.capture_done_event.is_set():
+                            break
+                        if batch:
+                            break
+                        continue
+                    if block:
+                        batch.append(block)
+
+                if not batch:
                     if self.capture_done_event.is_set():
                         break
-                    continue
-
-                if not block:
                     continue
 
                 if next_send_at is None:
@@ -487,19 +497,19 @@ class PcAudioStreamer:
                     delay = next_send_at - time.monotonic()
                     if delay > 0:
                         time.sleep(delay)
-                    elif -delay > block_interval:
-                        self.late_send_blocks += 1
+                    elif -delay > batch_interval:
+                        self.late_send_blocks += len(batch)
                         next_send_at = time.monotonic()
 
                 started = time.monotonic()
-                self.send_batch(block)
+                self.send_batch(b"".join(batch))
                 elapsed_ms = (time.monotonic() - started) * 1000.0
                 self.max_send_ms = max(self.max_send_ms, elapsed_ms)
-                self.sent_bytes += len(block)
-                self.sent_pcm_bytes += len(block) - 3
-                self.sent_blocks += 1
+                self.sent_bytes += sum(len(item) for item in batch)
+                self.sent_pcm_bytes += sum(max(0, len(item) - 3) for item in batch)
+                self.sent_blocks += len(batch)
 
-                next_send_at += block_interval
+                next_send_at += block_interval * len(batch)
                 now = time.monotonic()
                 if next_send_at < now - block_interval:
                     next_send_at = now
