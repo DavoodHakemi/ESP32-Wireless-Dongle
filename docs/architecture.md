@@ -73,3 +73,12 @@ Command responses are written immediately from the protocol dispatcher. Domain e
 The EventQueue is deliberately fixed at 65 records: Classic discovery can emit up to 32 device-found events, 32 detail events, and one completion event. Wi-Fi scan publication therefore uses bounded batches rather than relying on a larger queue.
 
 Cold-start Bluetooth Classic/BLE scan initialization is deferred from the command path into the corresponding service update. The acceptance response therefore remains bounded by the protocol/transport path, while completion and initialization failures remain asynchronous service events.
+
+
+## PC audio transport timing
+
+The default PC audio profile is 22.05 kHz, mono, 16-bit PCM. Windows loopback capture is performed at 44.1 kHz with 256-frame reads, giving an exact 2:1 resampling ratio. Two capture reads therefore produce exactly one 256-sample transport block (11.61 ms of audio), avoiding the fractional 48 kHz -> 22.05 kHz packet cadence that previously emitted alternating 470/471-sample output bursts.
+
+The host sender emits one complete audio block at the block playback interval instead of forwarding capture bursts directly to UART. The host queue is intentionally bounded to eight blocks (~93 ms at 22.05 kHz); when the transport falls behind, the oldest queued block is discarded rather than blocking WASAPI capture and allowing live latency to grow into seconds.
+
+At 921600 baud, a typical 523-byte mono audio frame occupies about 5.7 ms of line time, below the 11.61 ms audio-block period. The transport therefore has approximately 2x line-rate headroom for the default profile; continuity depends on scheduler/OS/UART jitter rather than raw serial bandwidth.

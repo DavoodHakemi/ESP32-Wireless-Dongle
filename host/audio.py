@@ -1,9 +1,11 @@
 """Windows system-audio capture for the ESP32 A2DP audio bridge.
 
-This version uses SoundCard's native Windows/WASAPI loopback backend.
-The streaming path captures Windows system audio as float PCM, converts it to
-mono signed 16-bit PCM, resamples to 22.05 kHz, and sends it uncompressed over
-the fixed 921600-baud serial link.
+The streaming path uses SoundCard/WASAPI loopback capture at 44.1 kHz, converts
+the capture to the selected PCM profile, resamples to the transport rate, and
+sends fixed-size uncompressed blocks over the 921600-baud serial link. The
+default 22.05 kHz mono profile uses an exact 2:1 capture ratio and a paced
+transport queue so capture jitter does not become UART burst traffic or stale
+queued audio.
 """
 
 from __future__ import annotations
@@ -17,16 +19,23 @@ import warnings
 from typing import Callable, Optional
 
 from audio_config import AudioProfile, DEFAULT_AUDIO_PROFILE, SUPPORTED_CHANNELS, AUDIO_BLOCK_SAMPLES
+from audio_pipeline import LinearResampler
 
 import numpy as np
 import soundcard as sc
 
 
-CAPTURE_RATE = 48000
+# 44.1 kHz capture gives an exact 2:1 ratio to the default 22.05 kHz transport
+# rate, avoiding the old 48 kHz -> 22.05 kHz fractional cadence and its bursty
+# 256-sample packet schedule.
+CAPTURE_RATE = 44100
 CAPTURE_BLOCK_FRAMES = 1024
-CAPTURE_RECORD_FRAMES = 1024
-CAPTURE_RECORDER_BLOCKSIZE = 2048
-AUDIO_QUEUE_MAX_BLOCKS = 256
+CAPTURE_RECORD_FRAMES = 256
+CAPTURE_RECORDER_BLOCKSIZE = 1024
+# Keep live audio latency bounded. Older code allowed several seconds of queued
+# audio when UART/Windows scheduling stalled. Live playback must prefer recent
+# audio over delayed audio.
+AUDIO_QUEUE_MAX_BLOCKS = 8
 PROBE_SECONDS = 0.35
 LIVE_MONITOR_SECONDS = 3.0
 SELF_TEST_SECONDS = 2.0
@@ -43,53 +52,6 @@ warnings.filterwarnings(
 )
 
 _preferred_loopback_id: Optional[str] = None
-
-
-class LinearResampler:
-    """Streaming linear PCM resampler for stereo int16 audio."""
-
-    def __init__(self, input_rate: int, output_rate: int) -> None:
-        if input_rate <= 0 or output_rate <= 0:
-            raise ValueError("Sample rates must be positive")
-        self.input_rate = input_rate
-        self.output_rate = output_rate
-        self.step = input_rate / output_rate
-        self.position = 0.0
-        self.previous: Optional[np.ndarray] = None
-
-    def process(self, samples: np.ndarray) -> np.ndarray:
-        if samples.ndim != 2:
-            raise ValueError("Expected samples with shape (frames, channels)")
-        if samples.size == 0:
-            return np.empty((0, samples.shape[1]), dtype=np.int16)
-
-        if self.previous is not None:
-            work = np.vstack((self.previous[None, :], samples))
-        else:
-            work = samples
-
-        if work.shape[0] < 2:
-            self.previous = work[-1].copy()
-            return np.empty((0, work.shape[1]), dtype=np.int16)
-
-        positions = []
-        pos = self.position
-        limit = work.shape[0] - 1
-        while pos < limit:
-            positions.append(pos)
-            pos += self.step
-
-        self.position = pos - limit
-        self.previous = work[-1].copy()
-
-        if not positions:
-            return np.empty((0, work.shape[1]), dtype=np.int16)
-
-        p = np.asarray(positions, dtype=np.float64)
-        i0 = np.floor(p).astype(np.int64)
-        frac = (p - i0).reshape(-1, 1)
-        out = work[i0] * (1.0 - frac) + work[i0 + 1] * frac
-        return np.clip(np.rint(out), -32768, 32767).astype(np.int16)
 
 
 def _speaker_name_and_id(speaker) -> tuple[str, str]:
@@ -403,6 +365,9 @@ class PcAudioStreamer:
         self.captured_frames = 0
         self.last_peak = 0
         self.last_rms = 0
+        self.max_queue_depth = 0
+        self.max_send_ms = 0.0
+        self.late_send_blocks = 0
         self._recorder = None
         self._loopback = None
         self._selected_route_name = ""
@@ -435,6 +400,9 @@ class PcAudioStreamer:
         self.captured_frames = 0
         self.last_peak = 0
         self.last_rms = 0
+        self.max_queue_depth = 0
+        self.max_send_ms = 0.0
+        self.late_send_blocks = 0
         self.input_rate = CAPTURE_RATE
         self.input_channels = 0
         self._recorder = None
@@ -495,6 +463,12 @@ class PcAudioStreamer:
         return np.rint(samples * 32767.0).astype(np.int16)
 
     def _run_sender(self) -> None:
+        # Pace one complete transport block at the exact PCM playback period.
+        # This prevents the old capture-thread burst pattern (two blocks emitted
+        # back-to-back after a 1024-frame WASAPI read) from becoming UART burst
+        # traffic and A2DP buffer jitter.
+        block_interval = AUDIO_BLOCK_SAMPLES / float(self.profile.sample_rate)
+        next_send_at: Optional[float] = None
         try:
             while True:
                 try:
@@ -506,10 +480,29 @@ class PcAudioStreamer:
 
                 if not block:
                     continue
+
+                if next_send_at is None:
+                    next_send_at = time.monotonic()
+                else:
+                    delay = next_send_at - time.monotonic()
+                    if delay > 0:
+                        time.sleep(delay)
+                    elif -delay > block_interval:
+                        self.late_send_blocks += 1
+                        next_send_at = time.monotonic()
+
+                started = time.monotonic()
                 self.send_batch(block)
+                elapsed_ms = (time.monotonic() - started) * 1000.0
+                self.max_send_ms = max(self.max_send_ms, elapsed_ms)
                 self.sent_bytes += len(block)
                 self.sent_pcm_bytes += len(block) - 3
                 self.sent_blocks += 1
+
+                next_send_at += block_interval
+                now = time.monotonic()
+                if next_send_at < now - block_interval:
+                    next_send_at = now
         except Exception as exc:
             self.error = exc
             self.capture_stop_event.set()
@@ -581,7 +574,7 @@ class PcAudioStreamer:
                         output = resampler.process(pcm)
                         if output.size == 0:
                             continue
-                        pending.extend(output[:, :1].astype("<i2", copy=False).tobytes())
+                        pending.extend(output.astype("<i2", copy=False).tobytes())
 
                         block_bytes = block_samples * self.profile.channels * 2
                         while len(pending) >= block_bytes and not self.capture_stop_event.is_set():
@@ -591,10 +584,24 @@ class PcAudioStreamer:
                             payload.append(0x50)
                             payload.extend(int(block_samples).to_bytes(2, "little"))
                             payload.extend(pcm_bytes)
+                            packet = bytes(payload)
                             try:
-                                self.block_queue.put(bytes(payload), timeout=0.25)
+                                self.block_queue.put_nowait(packet)
                             except queue.Full:
-                                self.dropped_chunks += 1
+                                # Drop the oldest queued block rather than blocking the
+                                # capture thread. Blocking capture turns a transport stall
+                                # into WASAPI discontinuities and unbounded live latency.
+                                try:
+                                    self.block_queue.get_nowait()
+                                except queue.Empty:
+                                    pass
+                                try:
+                                    self.block_queue.put_nowait(packet)
+                                except queue.Full:
+                                    self.dropped_chunks += 1
+                                else:
+                                    self.dropped_chunks += 1
+                            self.max_queue_depth = max(self.max_queue_depth, self.block_queue.qsize())
         except Exception as exc:
             if not self.capture_stop_event.is_set():
                 self.error = exc
@@ -619,6 +626,7 @@ class PcAudioStreamer:
             f"transport={self.profile.sample_rate} Hz/{self.profile.channels} ch/{self.profile.bits}-bit, "
             f"sent={self.sent_bytes} raw PCM bytes ({self.sent_pcm_bytes} PCM bytes), "
             f"blocks={self.sent_blocks}, dropped_capture_chunks={self.dropped_chunks}, "
-            f"capture_queue={queued}/{AUDIO_QUEUE_MAX_BLOCKS}, captured_frames={self.captured_frames}, "
-            f"peak={self.last_peak}, rms={self.last_rms}{route}"
+            f"capture_queue={queued}/{AUDIO_QUEUE_MAX_BLOCKS}, max_queue={self.max_queue_depth}, "
+            f"captured_frames={self.captured_frames}, max_send_ms={self.max_send_ms:.2f}, "
+            f"late_send_blocks={self.late_send_blocks}, peak={self.last_peak}, rms={self.last_rms}{route}"
         )

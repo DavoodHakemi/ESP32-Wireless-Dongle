@@ -2,6 +2,11 @@
 
 ## 2.3.11
 
+- Stabilized PC audio transport timing by capturing at 44.1 kHz with 256-frame reads, pacing 256-sample UART audio blocks to their real-time playback interval, and bounding the host audio queue to prevent multi-second latency accumulation.
+- Preserved stereo packetization for non-mono profiles and added host-side queue/send timing diagnostics for audio transport verification.
+- Added a dedicated streaming resampler module and regression coverage for the exact 44.1 kHz -> 22.05 kHz block cadence.
+
+
 - Reworked Classic Bluetooth discovery to start GAP discovery directly while leaving BluetoothSerial as the sole GAP callback owner and scan-result collector; no second callback or scan task is created.
 - Removed post-scan BluetoothSerial teardown/reinitialization because the framework-owned discovery path preserves the SPP/GAP lifecycle.
 - Restored post-event lifecycle ordering without changing the wire protocol or command/event IDs.
