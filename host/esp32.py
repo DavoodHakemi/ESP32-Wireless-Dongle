@@ -688,9 +688,8 @@ class Esp32Device:
     def audio_send_batch(self, pcm_payload: bytes) -> None:
         """Send one or more complete PCM blocks as one UART write.
 
-        The wire protocol is unchanged: each PCM block is still wrapped in its
-        own CMD_AUDIO_DATA frame. Multiple frames are only coalesced at the
-        transport write boundary to reduce USB-UART scheduling jitter.
+        Each PCM block remains its own CMD_AUDIO_DATA wire frame. Coalescing is
+        only a transport optimization to reduce USB-UART scheduling jitter.
         """
         if not pcm_payload:
             raise ValueError("Audio PCM payload cannot be empty")
