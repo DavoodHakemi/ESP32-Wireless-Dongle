@@ -36,7 +36,7 @@ CAPTURE_RECORDER_BLOCKSIZE = 256
 # audio when UART/Windows scheduling stalled. Live playback must prefer recent
 # audio over delayed audio.
 AUDIO_QUEUE_MAX_BLOCKS = 8
-AUDIO_SEND_BATCH_BLOCKS = 4
+AUDIO_SEND_BATCH_BLOCKS = 2
 PROBE_SECONDS = 0.35
 LIVE_MONITOR_SECONDS = 3.0
 SELF_TEST_SECONDS = 2.0
@@ -464,10 +464,9 @@ class PcAudioStreamer:
         return np.rint(samples * 32767.0).astype(np.int16)
 
     def _run_sender(self) -> None:
-        # Coalesce several complete PCM blocks into one transport write.
-        # The individual wire frames remain unchanged; only the USB-UART write
-        # boundary is larger so Windows/CP210x scheduling cannot create a
-        # starvation gap between otherwise on-time audio blocks.
+        # Coalesce two complete PCM blocks into one UART write. This reduces
+        # USB-UART scheduling jitter while keeping each burst short enough
+        # to avoid starving the A2DP callback path.
         block_interval = AUDIO_BLOCK_SAMPLES / float(self.profile.sample_rate)
         batch_interval = block_interval * AUDIO_SEND_BATCH_BLOCKS
         next_send_at: Optional[float] = None
@@ -476,7 +475,9 @@ class PcAudioStreamer:
                 batch: list[bytes] = []
                 while len(batch) < AUDIO_SEND_BATCH_BLOCKS:
                     try:
-                        block = self.block_queue.get(timeout=0.05 if not batch else block_interval)
+                        block = self.block_queue.get(
+                            timeout=0.05 if not batch else block_interval
+                        )
                     except queue.Empty:
                         if self.capture_done_event.is_set():
                             break
