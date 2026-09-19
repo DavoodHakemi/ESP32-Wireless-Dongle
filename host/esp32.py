@@ -140,7 +140,6 @@ class Esp32Device:
         self.transport = SerialTransport(port=port, baudrate=baudrate)
         self.parser = FrameParser()
         self.sequence = 0
-        self._audio_channels = 1
         self.events: deque[Frame] = deque()
         self.responses: deque[Frame] = deque()
         self._rx_stop = threading.Event()
@@ -677,7 +676,6 @@ class Esp32Device:
             raise ValueError("Supported audio profiles: 11025/22050/44100 Hz, mono/stereo, 16-bit")
         payload = int(sample_rate).to_bytes(4, "little") + bytes([channels, bits])
         self._check_status(self.request(CMD_AUDIO_START, payload=payload))
-        self._audio_channels = channels
 
     def audio_stop(self) -> None:
         self._check_status(self.request(CMD_AUDIO_STOP))
@@ -686,37 +684,16 @@ class Esp32Device:
         self.audio_send_batch(pcm_block)
 
     def audio_send_batch(self, pcm_payload: bytes) -> None:
-        """Send one or more complete PCM blocks as one UART write.
-
-        Each PCM block remains its own CMD_AUDIO_DATA wire frame. Coalescing is
-        only a transport optimization to reduce USB-UART scheduling jitter.
-        """
         if not pcm_payload:
             raise ValueError("Audio PCM payload cannot be empty")
+        if len(pcm_payload) < 5 or pcm_payload[0] != 0x50:
+            raise ValueError("Audio PCM payload must be a complete raw PCM block")
         if len(pcm_payload) > 8192:
-            raise ValueError("Audio PCM batch is too large")
-
-        frames: list[bytes] = []
-        offset = 0
-        while offset < len(pcm_payload):
-            remaining = len(pcm_payload) - offset
-            if remaining < 5 or pcm_payload[offset] != 0x50:
-                raise ValueError("Audio PCM batch contains an invalid block")
-
-            samples = int.from_bytes(pcm_payload[offset + 1:offset + 3], "little")
-            if samples <= 0:
-                raise ValueError("Audio PCM block has invalid sample count")
-            block_length = 3 + samples * self._audio_channels * 2
-            if block_length > remaining:
-                raise ValueError("Audio PCM batch contains a truncated block")
-
-            block = pcm_payload[offset:offset + block_length]
-            frames.append(build_frame(
-                TYPE_REQUEST, CMD_AUDIO_DATA, self._next_sequence(), block
-            ))
-            offset += block_length
-
-        self.transport.write_stream(b"".join(frames))
+            raise ValueError("Audio PCM block is too large")
+        frame = build_frame(
+            TYPE_REQUEST, CMD_AUDIO_DATA, self._next_sequence(), pcm_payload
+        )
+        self.transport.write_stream(frame)
 
     def audio_status(self) -> dict:
         payload = self._check_status(self.request(CMD_AUDIO_STATUS, timeout=5.0))
