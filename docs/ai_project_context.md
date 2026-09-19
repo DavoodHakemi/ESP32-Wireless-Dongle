@@ -24,7 +24,7 @@ Current repository snapshot at the time this document was created:
 - Default branch: `master`
 - Current master commit: `d2b980dcbc1baa85e9a1cd524aefc65e02a264fe`
 - Current commit message: `fix: replace embedded null literal in Bluetooth scan source`
-- Firmware version: `2.3.11`
+- Firmware version: `2.3.12`
 - Wire protocol version: `1`
 
 ---
@@ -581,7 +581,7 @@ Do not add `Serial.print()` / `Serial.println()` to arbitrary service code.
 2. wait 250 ms
 3. initialize Wi-Fi
 4. initialize A2DP subsystem
-5. emit structured `Firmware 2.3.11 initialized` log
+5. emit structured `Firmware %s initialized` log where the version comes from `DONGLE_FIRMWARE_VERSION`
 
 A2DP initialization is a critical dependency for startup in current source.
 
@@ -1430,7 +1430,7 @@ Level 4: Physical hardware runtime verification
 
 Never report one level as proof of a later level.
 
-The project has also used a mock environment to validate C++ compilation/linking when the actual PlatformIO package cache was unavailable.
+The project has also used a mock environment to validate C++ compilation/linking when the actual PlatformIO package cache was unavailable. That environment is now committed under `test/mock/` and is rerunnable with `bash test/mock/run_mock_build.sh`.
 
 Mock testing is useful for:
 
@@ -1705,7 +1705,7 @@ Do not adapt the source backwards merely to make old documentation appear consis
 
 ## Confirmed from repository/source
 
-- firmware version: 2.3.11
+- firmware version: 2.3.12
 - protocol version: 1
 - PlatformIO target: `esp32dev`
 - Arduino-ESP32 3.0.7

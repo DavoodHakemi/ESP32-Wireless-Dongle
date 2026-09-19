@@ -2,7 +2,7 @@
 #include "config/AppConfig.h"
 #include "config/HardwareConfig.h"
 #include "config/Version.h"
-#include <ESP.h>
+#include <Arduino.h>
 #include <cstring>
 
 namespace dongle::services::system {

@@ -37,7 +37,11 @@ Result<void> A2DPSourceAdapter::startByAddress(
     // serialized with the rest of the Bluetooth subsystem.
     // retries == 0 intentionally means: go directly to the library's
     // name-discovery fallback on the first reconnect heartbeat.
-    _source.set_auto_reconnect(address, retries >= 0 ? retries : 3);
+    // The library signature takes a mutable esp_bd_addr_t and only reads it,
+    // so pass a local copy instead of casting away const on the caller data.
+    uint8_t targetAddress[6];
+    memcpy(targetAddress, address, sizeof(targetAddress));
+    _source.set_auto_reconnect(targetAddress, retries >= 0 ? retries : 3);
     _source.start();
     return Result<void>::ok();
 }

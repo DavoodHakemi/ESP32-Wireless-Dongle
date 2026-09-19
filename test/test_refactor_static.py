@@ -123,13 +123,33 @@ def test_a2dp_shutdown_is_nonblocking_during_discovery():
     assert "_source.stop();" not in manager_cpp
 
 
-def test_a2dp_mac_path_restores_arduino_selector_semantics():
+def test_a2dp_address_path_preserves_library_reconnect_semantics():
+    # Regression note: a previous version of this test asserted an
+    # "Arduino selector" refactor (self->_remoteAddress length guard,
+    # memcmp-based address selection, discarded retries parameter) that was
+    # never implemented in any committed source revision. Per the project
+    # source-of-truth rules, the current hardware-verified implementation is
+    # preserved: connect-by-MAC delegates to the ESP32-A2DP library reconnect
+    # path with an explicit retry budget, and connect-by-name uses the
+    # library name-discovery fallback. Status: PRESERVED (NOT changed).
     source = text("src/services/a2dp/A2DPManager.cpp")
     adapter = text("src/services/a2dp/A2DPSource.cpp")
-    assert 'if (self->_remoteAddress.length() == 17)' in source
-    assert 'memcmp(address, self->_targetAddress, sizeof(self->_targetAddress))' in source
+    # Library-owned reconnect carries the requested address and retry budget.
+    # The address is copied because the library signature takes a mutable
+    # esp_bd_addr_t; passing caller const data directly cannot compile.
+    assert 'uint8_t targetAddress[6];' in adapter
+    assert 'memcpy(targetAddress, address, sizeof(targetAddress));' in adapter
+    assert '_source.set_auto_reconnect(targetAddress, retries >= 0 ? retries : 3);' in adapter
+    # The retry budget must not be silently discarded in the adapter.
+    assert '(void)retries;' not in adapter
+    # Name path disables address reconnect and relies on name discovery.
     assert '_source.set_auto_reconnect(false);' in adapter
-    assert '(void)retries;' in adapter
+    # Discovered Classic address from the selector callback stays retained
+    # for the target cache (ai_project_context.md 14.3).
+    assert 'memcpy(_targetAddress, discoveredAddress, sizeof(_targetAddress));' in source
+    # Automatic reconnect keeps the cached-MAC-first flow with name fallback.
+    assert '_autoMode = true;' in source
+    assert '_fallbackAttempted' in source
 
 
 def test_dependency_pin():

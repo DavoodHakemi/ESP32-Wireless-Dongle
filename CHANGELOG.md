@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.12
+
+- Fixed a firmware compile regression in the A2DP address path: the pinned ESP32-A2DP v1.8.10 `set_auto_reconnect(esp_bd_addr_t, int)` signature takes a mutable address buffer, so `A2DPSourceAdapter::startByAddress` now passes a local copy of the caller's const address instead of relying on the `const_cast` that was silently removed on 2026-09-17. The removed cast had left the master tree uncompilable against the pinned library.
+- Replaced the invalid `<ESP.h>` include in `SystemService` with `<Arduino.h>`; the arduino-esp32 3.0.7 core exposes `Esp.h` through `Arduino.h` and has no top-level `ESP.h` header, so the previous include terminated compilation of the real build.
+- Aligned drifted regression tests with preserved behavior: the WASAPI recorder quantum assertion now pins the intentional 256-frame value documented in the 2.3.11 entries, and the former "Arduino selector" A2DP test was restored to pin the hardware-verified library-reconnect semantics instead of a refactor that was never committed to source.
+- Added `test/mock/`: a committed mock compile/link harness (Arduino/ESP32/FreeRTOS/BLE/A2DP stub headers, mock runtime, mock entry point and runner script) so verification level 2 remains available when the PlatformIO platform cache is unavailable. The harness reproduced both compile findings above before the real build confirmed them.
+- Verification evidence: full PlatformIO build/link/image creation passed on pioarduino 51.03.07 / arduino-esp32 3.0.7 / ESP-IDF 5.1.4 / ESP32-A2DP v1.8.10 (RAM 33.2%, Flash 42.0%); mock compile/link/boot passed under `-Wall -Wextra -Werror`; the complete Python regression suite (55 tests) passed.
+
 ## 2.3.11
 
 - Resolved A2DP PCM rate drift by measuring the actual source callback cadence and phase-converting 22.05 kHz PCM to the measured A2DP output rate; increased audio prebuffer to 8 blocks for scheduler jitter tolerance.

@@ -35,7 +35,11 @@ def test_audio_transport_uses_low_jitter_capture_settings() -> None:
 
     assert "CAPTURE_RATE = 44100" in source
     assert "CAPTURE_RECORD_FRAMES = 256" in source
-    assert "CAPTURE_RECORDER_BLOCKSIZE = 1024" in source
+    # The WASAPI recorder quantum was intentionally reduced from 1024 to 256
+    # frames so the capture buffer no longer adds a ~17.4 ms quantum at
+    # 44.1 kHz (see CHANGELOG 2.3.11). This must stay equal to
+    # CAPTURE_RECORD_FRAMES so one record call fills exactly one blocksize.
+    assert "CAPTURE_RECORDER_BLOCKSIZE = 256" in source
     assert "AUDIO_QUEUE_MAX_BLOCKS = 8" in source
     assert "block_interval = AUDIO_BLOCK_SAMPLES / float(self.profile.sample_rate)" in source
     assert "self.block_queue.put_nowait(packet)" in source
