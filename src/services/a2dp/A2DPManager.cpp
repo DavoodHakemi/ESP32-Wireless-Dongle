@@ -202,6 +202,8 @@ int32_t A2DPManager::frameCallback(Frame* frames, int32_t count) {
 
     const uint32_t now = millis();
 
+    portENTER_CRITICAL(&self->_callbackMux);
+
     if (self->_rateMeasureStartMs == 0) {
         self->_rateMeasureStartMs = now;
     }
