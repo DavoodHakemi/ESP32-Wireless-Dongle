@@ -74,6 +74,10 @@ void A2DPManager::resetRuntimeState() {
     _callbackCount = 0;
     _callbackBytes = 0;
     _lastCallbackMs = 0;
+    _estimatedA2dpSampleRate = 44100;
+    _rateMeasureStartMs = 0;
+    _rateMeasureFrames = 0;
+    _rateEstimatePending = false;
     _maxGapMs = 0;
     _stallCount = 0;
     _pcmStartedPending = false;
@@ -198,7 +202,11 @@ int32_t A2DPManager::frameCallback(Frame* frames, int32_t count) {
 
     const uint32_t now = millis();
 
-    portENTER_CRITICAL(&self->_callbackMux);
+    if (self->_rateMeasureStartMs == 0) {
+        self->_rateMeasureStartMs = now;
+    }
+    self->_rateMeasureFrames += static_cast<uint32_t>(count);
+
     const uint32_t previous = self->_lastCallbackMs;
 
     if (previous != 0) {
@@ -214,6 +222,37 @@ int32_t A2DPManager::frameCallback(Frame* frames, int32_t count) {
     self->_lastCallbackMs = now;
     ++self->_callbackCount;
     self->_callbackBytes += static_cast<uint32_t>(count) * sizeof(Frame);
+
+    if (static_cast<uint32_t>(now - self->_rateMeasureStartMs) >= 250 &&
+        self->_rateMeasureFrames >= 1000) {
+        const uint32_t elapsed = now - self->_rateMeasureStartMs;
+        const uint32_t measured =
+            (self->_rateMeasureFrames * 1000U + elapsed / 2U) / elapsed;
+
+        uint16_t nearest = 44100;
+        uint32_t bestError = 0xFFFFFFFFu;
+        const uint16_t candidates[] = {16000, 32000, 44100, 48000};
+        for (const uint16_t candidate : candidates) {
+            const uint32_t error =
+                measured > candidate
+                ? measured - candidate
+                : candidate - measured;
+            if (error < bestError) {
+                bestError = error;
+                nearest = candidate;
+            }
+        }
+
+        if (bestError <= nearest / 12U && nearest != self->_estimatedA2dpSampleRate) {
+            self->_estimatedA2dpSampleRate = nearest;
+            self->_rateEstimatePending = true;
+            self->_playbackResetPending = true;
+        }
+
+        self->_rateMeasureStartMs = now;
+        self->_rateMeasureFrames = 0;
+    }
+
     portEXIT_CRITICAL(&self->_callbackMux);
 
     const bool filled = self->fillFrames(frames, count);
@@ -240,7 +279,7 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
     if (_playbackResetPending) {
         _audioBlockLoaded = false;
         _audioSampleIndex = 0;
-        _audioRepeatPhase = 0;
+        _audioResamplePhase = 0;
         _audioLeft = 0;
         _audioRight = 0;
         _toneIndex = 0;
@@ -285,9 +324,15 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
     }
 
     const AudioProfile profile = _audio.profile();
-    const uint8_t repeatCount = profile.sampleRate
-        ? static_cast<uint8_t>(config::A2DP_TONE_SAMPLE_RATE / profile.sampleRate)
-        : 1;
+    uint16_t outputRate = 44100;
+    portENTER_CRITICAL(&_callbackMux);
+    outputRate = _estimatedA2dpSampleRate;
+    portEXIT_CRITICAL(&_callbackMux);
+
+    const uint32_t sourceRate = profile.sampleRate ? profile.sampleRate : 22050;
+    if (outputRate == 0) {
+        outputRate = 44100;
+    }
 
     int32_t output = 0;
 
@@ -300,7 +345,7 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
                 break;
             }
             _audioSampleIndex = 0;
-            _audioRepeatPhase = 0;
+            _audioResamplePhase = 0;
             _audioBlockLoaded = true;
         }
 
@@ -309,38 +354,33 @@ bool A2DPManager::fillFrames(Frame* frames, int32_t count) {
             continue;
         }
 
-        if (_audioRepeatPhase == 0) {
-            const uint32_t offset =
+        const uint32_t offset =
             config::AUDIO_HEADER_BYTES +
             static_cast<uint32_t>(_audioSampleIndex) *
             profile.channels * 2U;
 
-            _audioLeft = static_cast<int16_t>(
-                static_cast<uint16_t>(_audioBlock[offset]) |
-                (static_cast<uint16_t>(_audioBlock[offset + 1]) << 8));
+        _audioLeft = static_cast<int16_t>(
+            static_cast<uint16_t>(_audioBlock[offset]) |
+            (static_cast<uint16_t>(_audioBlock[offset + 1]) << 8));
 
-            _audioRight =
+        _audioRight =
             profile.channels == 2
             ? static_cast<int16_t>(
                 static_cast<uint16_t>(_audioBlock[offset + 2]) |
                 (static_cast<uint16_t>(_audioBlock[offset + 3]) << 8))
             : _audioLeft;
-        }
 
         frames[output].channel1 = _audioLeft;
         frames[output].channel2 = _audioRight;
         ++output;
 
-        if (profile.sampleRate == 44100) {
-            _audioRepeatPhase = 0;
+        _audioResamplePhase += sourceRate;
+        while (_audioResamplePhase >= outputRate) {
+            _audioResamplePhase -= outputRate;
             ++_audioSampleIndex;
-        }
-        else {
-            const uint8_t repetitions = repeatCount < 1 ? 1 : repeatCount;
-            ++_audioRepeatPhase;
-            if (_audioRepeatPhase >= repetitions) {
-                _audioRepeatPhase = 0;
-                ++_audioSampleIndex;
+            if (_audioSampleIndex >= _audio.blockSamples()) {
+                _audioBlockLoaded = false;
+                break;
             }
         }
     }
@@ -892,6 +932,8 @@ void A2DPManager::update() {
     uint32_t callbackBytes = 0;
     uint32_t maxGapMs = 0;
     uint32_t stalls = 0;
+    uint16_t estimatedRate = 44100;
+    bool rateEstimatePending = false;
 
     portENTER_CRITICAL(&_callbackMux);
     pcmStartedPending = _pcmStartedPending;
@@ -901,12 +943,21 @@ void A2DPManager::update() {
     callbackBytes = _callbackBytes;
     maxGapMs = _maxGapMs;
     stalls = _stallCount;
+    estimatedRate = _estimatedA2dpSampleRate;
+    rateEstimatePending = _rateEstimatePending;
+    _rateEstimatePending = false;
     portEXIT_CRITICAL(&_callbackMux);
 
     if (pcmStartedPending) {
         _logger.info(
             "A2DP PCM callback active; streaming started after %lu ms",
             static_cast<unsigned long>(toneCommandMs ? millis() - toneCommandMs : 0));
+    }
+
+    if (rateEstimatePending) {
+        _logger.info(
+            "A2DP measured output rate: %u Hz",
+            static_cast<unsigned>(estimatedRate));
     }
 
     if (_audio.takeUnderrunFlag()) {
