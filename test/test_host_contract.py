@@ -57,3 +57,12 @@ def test_low_latency_capture_quantum_matches_audio_read_quantum() -> None:
     assert "CAPTURE_BLOCK_FRAMES = 256" in source
     assert "CAPTURE_RECORD_FRAMES = 256" in source
     assert "CAPTURE_RECORDER_BLOCKSIZE = 256" in source
+
+
+def test_firmware_uart_read_uses_bulk_hardware_serial_path() -> None:
+    transport = (ROOT / "src/transport/SerialTransport.cpp").read_text(encoding="utf-8")
+    application = (ROOT / "src/application/DongleApplication.cpp").read_text(encoding="utf-8")
+
+    assert "return Serial.read(buffer, size);" in transport
+    assert "while (count < size && Serial.available())" not in transport
+    assert "static uint8_t buffer[2048];" in application
