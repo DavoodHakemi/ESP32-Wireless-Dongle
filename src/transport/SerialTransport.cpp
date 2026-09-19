@@ -15,9 +15,7 @@ bool SerialTransport::available() const {
 }
 size_t SerialTransport::read(uint8_t* buffer, size_t size) {
     if (!buffer || !size) return 0;
-    size_t count = 0;
-    while (count < size && Serial.available()) buffer[count++] = static_cast<uint8_t>(Serial.read());
-    return count;
+    return Serial.read(buffer, size);
 }
 size_t SerialTransport::write(const uint8_t* data, size_t size) {
     if (!data || !size) return 0;
