@@ -36,6 +36,8 @@ CAPTURE_RECORDER_BLOCKSIZE = 256
 # audio when UART/Windows scheduling stalled. Live playback must prefer recent
 # audio over delayed audio.
 AUDIO_QUEUE_MAX_BLOCKS = 8
+AUTO_ROUTE_PROBE_SECONDS = 0.05
+AUTO_ROUTE_MIN_PEAK = 100
 PROBE_SECONDS = 0.35
 LIVE_MONITOR_SECONDS = 3.0
 SELF_TEST_SECONDS = 2.0
@@ -419,6 +421,40 @@ class PcAudioStreamer:
                 self._loopback = _get_loopback_for_speaker(speaker)
                 self._selected_route_name = str(getattr(self._loopback, "name", ""))
             self._loopback_id = str(getattr(self._loopback, "id", ""))
+
+            # If the selected Windows endpoint is silent, probe the available
+            # loopbacks and prefer a currently active endpoint. This prevents
+            # a valid-but-silent default speaker from producing an all-zero
+            # PC audio stream.
+            _, selected_peak, _ = _probe_soundcard_loopback(
+                self._loopback,
+                AUTO_ROUTE_PROBE_SECONDS,
+            )
+            if selected_peak < AUTO_ROUTE_MIN_PEAK:
+                best = self._loopback
+                best_peak = selected_peak
+                for device in get_loopback_devices():
+                    if str(device["id"]) == self._loopback_id:
+                        continue
+                    candidate = _find_mic_by_id(str(device["id"]))
+                    if candidate is None:
+                        continue
+                    try:
+                        _, peak, _ = _probe_soundcard_loopback(
+                            candidate,
+                            AUTO_ROUTE_PROBE_SECONDS,
+                        )
+                    except Exception:
+                        continue
+                    if peak > best_peak:
+                        best = candidate
+                        best_peak = peak
+
+                if best is not self._loopback and best_peak >= AUTO_ROUTE_MIN_PEAK:
+                    self._loopback = best
+                    self._selected_route_name = str(getattr(best, "name", ""))
+                    self._loopback_id = str(getattr(best, "id", ""))
+
         except Exception as exc:
             raise RuntimeError(f"WASAPI system-audio route unavailable: {exc}") from exc
 

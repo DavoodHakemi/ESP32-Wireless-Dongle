@@ -2,6 +2,10 @@
 
 ## 2.3.11
 
+- Resolved A2DP PCM rate drift by measuring the actual source callback cadence and phase-converting 22.05 kHz PCM to the measured A2DP output rate; increased audio prebuffer to 8 blocks for scheduler jitter tolerance.
+- PC audio now probes the selected WASAPI loopback at startup and can switch to an active loopback when the default endpoint is silent.
+
+
 - Reworked realtime audio UART writes to bypass per-frame flush while retaining serialized writes for control/audio ordering; control traffic keeps the existing flushed path.
 - Reduced the WASAPI recorder quantum from 1024 to 256 frames so the capture buffer no longer adds an unnecessary ~17.4 ms quantum at 44.1 kHz.
 

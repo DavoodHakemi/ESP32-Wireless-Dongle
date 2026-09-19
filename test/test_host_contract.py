@@ -66,3 +66,21 @@ def test_firmware_uart_read_uses_bulk_hardware_serial_path() -> None:
     assert "return Serial.read(buffer, size);" in transport
     assert "while (count < size && Serial.available())" not in transport
     assert "static uint8_t buffer[2048];" in application
+
+
+def test_a2dp_uses_measured_output_rate_and_phase_resampling() -> None:
+    manager = (ROOT / "src/services/a2dp/A2DPManager.cpp").read_text(encoding="utf-8")
+    config = (ROOT / "include/config/AppConfig.h").read_text(encoding="utf-8")
+
+    assert "_estimatedA2dpSampleRate" in manager
+    assert "_rateMeasureFrames" in manager
+    assert "_audioResamplePhase += sourceRate" in manager
+    assert "AUDIO_PREBUFFER_MULTIPLIER = 8" in config
+
+
+def test_pc_audio_has_silent_route_fallback() -> None:
+    source = (ROOT / "host/audio.py").read_text(encoding="utf-8")
+    assert "AUTO_ROUTE_PROBE_SECONDS = 0.05" in source
+    assert "AUTO_ROUTE_MIN_PEAK = 100" in source
+    assert "selected_peak < AUTO_ROUTE_MIN_PEAK" in source
+    assert "best_peak >= AUTO_ROUTE_MIN_PEAK" in source

@@ -72,7 +72,11 @@ private:
     bool _audioBlockLoaded{false};
     bool _playbackResetPending{false};
     uint16_t _audioSampleIndex{0};
-    uint8_t _audioRepeatPhase{0};
+    uint32_t _audioResamplePhase{0};
+    uint16_t _estimatedA2dpSampleRate{44100};
+    uint32_t _rateMeasureStartMs{0};
+    uint32_t _rateMeasureFrames{0};
+    bool _rateEstimatePending{false};
     int16_t _audioLeft{0};
     int16_t _audioRight{0};
     uint32_t _callbackCount{0};
