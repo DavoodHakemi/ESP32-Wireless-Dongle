@@ -2,8 +2,6 @@
 
 ## 2.3.11
 
-- Replaced the failed four-block realtime audio burst with short two-block UART batches and increased the audio prebuffer margin; AudioStatus counters are labeled as blocks.
-
 - Reworked realtime audio UART writes to bypass per-frame flush while retaining serialized writes for control/audio ordering; control traffic keeps the existing flushed path.
 - Reduced the WASAPI recorder quantum from 1024 to 256 frames so the capture buffer no longer adds an unnecessary ~17.4 ms quantum at 44.1 kHz.
 
