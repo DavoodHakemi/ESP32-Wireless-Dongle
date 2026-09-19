@@ -20,7 +20,7 @@ constexpr uint8_t AUDIO_BITS_PER_SAMPLE = 16;
 constexpr uint16_t AUDIO_BLOCK_SAMPLES = 256;
 constexpr uint16_t AUDIO_HEADER_BYTES = 3;
 constexpr uint32_t AUDIO_RING_CAPACITY = 28672;
-constexpr uint32_t AUDIO_PREBUFFER_MULTIPLIER = 4;
+constexpr uint32_t AUDIO_PREBUFFER_MULTIPLIER = 8;
 constexpr uint8_t BT_SCAN_TABLE_SIZE = 32;
 constexpr uint16_t BLE_DETAIL_MAX = 240;
 }
