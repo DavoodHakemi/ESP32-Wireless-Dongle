@@ -225,7 +225,7 @@ int32_t A2DPManager::frameCallback(Frame* frames, int32_t count) {
     ++self->_callbackCount;
     self->_callbackBytes += static_cast<uint32_t>(count) * sizeof(Frame);
 
-    if (static_cast<uint32_t>(now - self->_rateMeasureStartMs) >= 250 &&
+    if (static_cast<uint32_t>(now - self->_rateMeasureStartMs) >= 500 &&
         self->_rateMeasureFrames >= 1000) {
         const uint32_t elapsed = now - self->_rateMeasureStartMs;
         const uint32_t measured =
