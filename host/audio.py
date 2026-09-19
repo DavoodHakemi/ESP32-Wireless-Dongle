@@ -29,9 +29,9 @@ import soundcard as sc
 # rate, avoiding the old 48 kHz -> 22.05 kHz fractional cadence and its bursty
 # 256-sample packet schedule.
 CAPTURE_RATE = 44100
-CAPTURE_BLOCK_FRAMES = 1024
+CAPTURE_BLOCK_FRAMES = 256
 CAPTURE_RECORD_FRAMES = 256
-CAPTURE_RECORDER_BLOCKSIZE = 1024
+CAPTURE_RECORDER_BLOCKSIZE = 256
 # Keep live audio latency bounded. Older code allowed several seconds of queued
 # audio when UART/Windows scheduling stalled. Live playback must prefer recent
 # audio over delayed audio.
@@ -531,8 +531,9 @@ class PcAudioStreamer:
 
             self._selected_route_name = str(getattr(loopback, "name", self._selected_route_name))
 
-            # A larger WASAPI blocksize with smaller record reads reduces callback-like
-            # churn while keeping end-to-end latency reasonable.
+            # Keep the WASAPI callback/read quantum aligned with the 5.8 ms capture
+            # interval. The transport sender aggregates resampled data into the
+            # 11.6 ms protocol block consumed by A2DP.
             with warnings.catch_warnings():
                 warnings.filterwarnings(
                     "ignore",

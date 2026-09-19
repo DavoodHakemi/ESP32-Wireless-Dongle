@@ -36,3 +36,24 @@ def test_host_reads_firmware_version_from_project_source_of_truth():
     main = (ROOT / "host/main.py").read_text(encoding="utf-8")
     assert 'VERSION_FILE = Path(__file__).resolve().parents[1] / "VERSION.txt"' in main
     assert 'EXPECTED_FIRMWARE_VERSION = VERSION_FILE.read_text' in main
+
+
+def test_audio_stream_uses_non_flushing_serial_path() -> None:
+    serial = (ROOT / "host/serial_transport.py").read_text(encoding="utf-8")
+    esp32 = (ROOT / "host/esp32.py").read_text(encoding="utf-8")
+
+    start = serial.index("    def write_stream(")
+    end = serial.index("    def read(", start)
+    stream_method = serial[start:end]
+
+    assert "self.serial.write(data)" in stream_method
+    assert "self.serial.flush()" not in stream_method
+    assert "self.transport.write_stream(frame)" in esp32
+
+
+def test_low_latency_capture_quantum_matches_audio_read_quantum() -> None:
+    source = (ROOT / "host/audio.py").read_text(encoding="utf-8")
+
+    assert "CAPTURE_BLOCK_FRAMES = 256" in source
+    assert "CAPTURE_RECORD_FRAMES = 256" in source
+    assert "CAPTURE_RECORDER_BLOCKSIZE = 256" in source

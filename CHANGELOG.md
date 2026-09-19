@@ -2,6 +2,10 @@
 
 ## 2.3.11
 
+- Reworked realtime audio UART writes to bypass per-frame flush while retaining serialized writes for control/audio ordering; control traffic keeps the existing flushed path.
+- Reduced the WASAPI recorder quantum from 1024 to 256 frames so the capture buffer no longer adds an unnecessary ~17.4 ms quantum at 44.1 kHz.
+
+
 - Stabilized PC audio transport timing by capturing at 44.1 kHz with 256-frame reads, pacing 256-sample UART audio blocks to their real-time playback interval, and bounding the host audio queue to prevent multi-second latency accumulation.
 - Preserved stereo packetization for non-mono profiles and added host-side queue/send timing diagnostics for audio transport verification.
 - Added a dedicated streaming resampler module and regression coverage for the exact 44.1 kHz -> 22.05 kHz block cadence.

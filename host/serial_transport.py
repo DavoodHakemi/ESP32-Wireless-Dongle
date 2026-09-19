@@ -78,6 +78,14 @@ class SerialTransport:
             self.serial.write(data)
             self.serial.flush()
 
+    def write_stream(self, data: bytes) -> None:
+        """Queue realtime streaming bytes without waiting for UART drain."""
+        if not self.is_connected():
+            raise RuntimeError("Serial port is not connected")
+
+        with self._write_lock:
+            self.serial.write(data)
+
     def read(self, size: int = 512) -> bytes:
         if not self.is_connected():
             raise RuntimeError("Serial port is not connected")

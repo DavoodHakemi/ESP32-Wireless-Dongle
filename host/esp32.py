@@ -693,7 +693,7 @@ class Esp32Device:
         frame = build_frame(
             TYPE_REQUEST, CMD_AUDIO_DATA, self._next_sequence(), pcm_payload
         )
-        self.transport.write(frame)
+        self.transport.write_stream(frame)
 
     def audio_status(self) -> dict:
         payload = self._check_status(self.request(CMD_AUDIO_STATUS, timeout=5.0))
