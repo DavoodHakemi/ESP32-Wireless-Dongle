@@ -4,7 +4,7 @@
 
 namespace dongle::config {
 constexpr uint32_t SERIAL_BAUD = 921600UL;
-constexpr uint32_t SERIAL_RX_BUFFER = 8192;
+constexpr uint32_t SERIAL_RX_BUFFER = 4096;
 constexpr uint32_t SERIAL_TX_BUFFER = 4096;
 constexpr uint32_t CPU_FREQUENCY_MHZ = 240;
 constexpr uint32_t FLASH_FREQUENCY_HZ = 80000000UL;
