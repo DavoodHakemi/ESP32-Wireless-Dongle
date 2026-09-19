@@ -47,3 +47,26 @@ None produced in this session (no hardware attached). The two compile fixes rest
 ## Final status
 
 **PARTIAL** - static, mock and full PlatformIO build/link verification are complete, and the Python regression suite is green. Hardware runtime verification remains with the owner as required by the project regression checklist.
+
+---
+
+## Re-verification after integration with the A2DP rate-drift base
+
+The 2.3.12 fix set was rebased onto `cc3a865` ("Fix A2DP PCM rate drift"), which introduced the measured-callback-rate estimator, the phase-accumulator resampler in `A2DPManager`, the 8-block audio prebuffer and the host WASAPI loopback auto-select. Findings and evidence from that pass:
+
+1. **New test drift found and aligned.** `test_audio_ring_capacity_keeps_prebuffer_margin` still pinned `AUDIO_PREBUFFER_MULTIPLIER = 4`; the rate-drift commit intentionally raised it to 8 (CHANGELOG-documented). The invariant under test (ring capacity dwarfs prebuffer) still holds with a wide margin, so the pin was updated to 8 with a rationale comment. Same drift class as findings (3) and (4) above.
+2. **Compile-defect relevance confirmed.** The rate-drift commit alone still contains both compile defects fixed by 2.3.12 (removed `const_cast` in `A2DPSource::startByAddress`, invalid `<ESP.h>` include in `SystemService`), because it was authored on the pre-fix base. Only the integrated tree (2.3.12 on top of the rate-drift base) compiles against the pinned toolchain — confirmed by the full PlatformIO build below.
+3. No semantic conflict between the two change sets: 2.3.12 touches the A2DP *source* address path and SystemService includes; the rate-drift work touches the A2DP *sink-side* fill/rate path, `AppConfig.h` and host capture routing. Wire protocol untouched by both.
+
+### Re-verification evidence
+
+| Check | Status | Evidence |
+|---|---|---|
+| Python regression tests | PASS | `python -m pytest -q`: 61 passed (55 prior + 6 new rate-model/host-contract tests from the rate-drift base) |
+| Mock C++ compile/link/boot | PASS | All src/*.cpp including the new rate-tracking `A2DPManager` code compiled under `-Wall -Wextra -Werror`; mock boot ran `setup()` + 3 `loop()` iterations |
+| PlatformIO full build/link/image | PASS | `pio run -e esp32dev` SUCCESS: RAM 33.2% (108820 B), Flash 42.1% (1763789 B), esp32 image created with esptool v4.8.1.1 |
+| Hardware runtime | NOT VERIFIED | No ESP32 hardware attached; the rate-drift fix's on-device effect (measured-rate resampling) remains to be validated by the owner |
+
+### Final status after integration
+
+**PARTIAL** - the integrated tree (2.3.12 on top of the A2DP rate-drift base) is compile-verified, regression-green and mock-boot-clean. The user-reported audio playback symptom is NOT claimed fixed: the rate-drift mechanism itself requires hardware evidence, and this environment cannot produce it.

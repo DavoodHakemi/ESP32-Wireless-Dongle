@@ -96,7 +96,11 @@ def test_audio_buffer_state_and_profile_are_guarded():
 def test_audio_ring_capacity_keeps_prebuffer_margin():
     config = text("include/config/AppConfig.h")
     assert "constexpr uint32_t AUDIO_RING_CAPACITY = 28672;" in config
-    assert "constexpr uint32_t AUDIO_PREBUFFER_MULTIPLIER = 4;" in config
+    # Prebuffer was intentionally raised from 4 to 8 blocks (2.3.11 rate-drift
+    # work: scheduler jitter tolerance). The invariant under test is that the
+    # 28672-sample ring (112 blocks of 256) still dwarfs the prebuffer, so the
+    # margin keeps holding with 8 blocks (2048 samples, 104 blocks of headroom).
+    assert "constexpr uint32_t AUDIO_PREBUFFER_MULTIPLIER = 8;" in config
 
 
 def test_a2dp_stats_are_mutex_protected_without_volatile():

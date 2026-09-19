@@ -7,6 +7,8 @@
 - Aligned drifted regression tests with preserved behavior: the WASAPI recorder quantum assertion now pins the intentional 256-frame value documented in the 2.3.11 entries, and the former "Arduino selector" A2DP test was restored to pin the hardware-verified library-reconnect semantics instead of a refactor that was never committed to source.
 - Added `test/mock/`: a committed mock compile/link harness (Arduino/ESP32/FreeRTOS/BLE/A2DP stub headers, mock runtime, mock entry point and runner script) so verification level 2 remains available when the PlatformIO platform cache is unavailable. The harness reproduced both compile findings above before the real build confirmed them.
 - Verification evidence: full PlatformIO build/link/image creation passed on pioarduino 51.03.07 / arduino-esp32 3.0.7 / ESP-IDF 5.1.4 / ESP32-A2DP v1.8.10 (RAM 33.2%, Flash 42.0%); mock compile/link/boot passed under `-Wall -Wextra -Werror`; the complete Python regression suite (55 tests) passed.
+- Rebased the 2.3.12 fix set onto the A2DP rate-drift work (`Fix A2DP PCM rate drift`): the two compile fixes were still required because the rate-drift commit was authored on the pre-fix base; real PlatformIO build, mock harness and the full 61-test regression suite were re-run green on the integrated tree (evidence in `docs/verification-report-2.3.12.md`, re-verification section).
+- Aligned `test_audio_ring_capacity_keeps_prebuffer_margin` with the intentional prebuffer raise from 4 to 8 blocks, keeping the ring-capacity margin invariant it actually guards.
 
 ## 2.3.11
 
